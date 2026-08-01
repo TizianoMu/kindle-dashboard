@@ -143,6 +143,8 @@ struct Dashboard {
   int tiziano_day;
   int gaia_steps;
   int tiziano_steps;
+  int gaia_week_workouts;
+  int tiziano_week_workouts;
   char gaia_sports[128];
   char tiziano_sports[128];
   int water_tenths;
@@ -602,6 +604,8 @@ int parseDashboard(const char* json, Dashboard* dashboard) {
   dashboard->tiziano_day = extractInt(json, NULL, "tiziano_streak", legacy_tiziano_day);
   dashboard->gaia_steps = extractInt(json, NULL, "gaia_steps", dashboard->steps);
   dashboard->tiziano_steps = extractInt(json, NULL, "tiziano_steps", dashboard->steps);
+  dashboard->gaia_week_workouts = extractInt(json, NULL, "gaia_week_workouts", 0);
+  dashboard->tiziano_week_workouts = extractInt(json, NULL, "tiziano_week_workouts", 0);
   extractString(json, NULL, "gaia_sports", dashboard->gaia_sports, sizeof(dashboard->gaia_sports), "");
   extractString(json, NULL, "tiziano_sports", dashboard->tiziano_sports, sizeof(dashboard->tiziano_sports), "");
   if (dashboard->gaia_day < 0) dashboard->gaia_day = 0;
@@ -1372,7 +1376,7 @@ void drawRadialMetricTenths(Canvas* canvas, int x, int y, int w, int h, const ch
   drawTextCentered(canvas, cx, y + h - 38, w - 18, metric, metric_scale, 0);
 }
 
-void drawChallengeStreakCard(Canvas* canvas, int x, int y, int w, int h, const char* title, int current_day) {
+void drawChallengeStreakCard(Canvas* canvas, int x, int y, int w, int h, const char* title, int current_day, int week_workouts) {
   strokeRect(canvas, x, y, w, h, 3, 0);
   const int title_scale = textWidth(title, 4) <= w - 24 ? 4 : 3;
   drawTextCentered(canvas, x + w / 2, y + 14, w - 24, title, title_scale, 0);
@@ -1380,7 +1384,10 @@ void drawChallengeStreakCard(Canvas* canvas, int x, int y, int w, int h, const c
   char streak_text[24];
   snprintf(streak_text, sizeof(streak_text), "%d", current_day < 0 ? 0 : current_day);
   drawTextCentered(canvas, x + w / 2, y + 70, w - 24, streak_text, 5, 0);
-  drawTextCentered(canvas, x + w / 2, y + h - 34, w - 24, "GIORNI CONSECUTIVI", 2, 0);
+  drawTextCentered(canvas, x + w / 2, y + 112, w - 24, "GIORNI CONSECUTIVI", 2, 0);
+  char week_text[48];
+  snprintf(week_text, sizeof(week_text), "SETTIMANA: %d ALLENAMENTI", week_workouts < 0 ? 0 : week_workouts);
+  drawTextCentered(canvas, x + w / 2, y + h - 26, w - 20, week_text, 2, 0);
 }
 
 void drawSportsCard(Canvas* canvas, int x, int y, int w, int h, const char* title, const char* sports) {
@@ -1928,8 +1935,8 @@ void drawChallengeDashboard(Canvas* canvas, const Dashboard* dashboard, const ch
 
   drawPersonStepsCard(canvas, content_x, content_y, column_w, steps_h, "PASSI GAIA", dashboard->gaia_steps, dashboard->steps_target, dashboard->steps_unit);
   drawPersonStepsCard(canvas, content_x + column_w + gap, content_y, column_w, steps_h, "PASSI TIZIANO", dashboard->tiziano_steps, dashboard->steps_target, dashboard->steps_unit);
-  drawChallengeStreakCard(canvas, content_x, streak_y, column_w, streak_h, "STREAK GAIA", dashboard->gaia_day);
-  drawChallengeStreakCard(canvas, content_x + column_w + gap, streak_y, column_w, streak_h, "STREAK TIZIANO", dashboard->tiziano_day);
+  drawChallengeStreakCard(canvas, content_x, streak_y, column_w, streak_h, "STREAK GAIA", dashboard->gaia_day, dashboard->gaia_week_workouts);
+  drawChallengeStreakCard(canvas, content_x + column_w + gap, streak_y, column_w, streak_h, "STREAK TIZIANO", dashboard->tiziano_day, dashboard->tiziano_week_workouts);
   drawSportsCard(canvas, content_x, sports_y, column_w, sports_h, "SPORT GAIA", dashboard->gaia_sports);
   drawSportsCard(canvas, content_x + column_w + gap, sports_y, column_w, sports_h, "SPORT TIZIANO", dashboard->tiziano_sports);
 }

@@ -110,6 +110,8 @@ type DashboardPayload = {
     tiziano_day: number;
     gaia_streak: number;
     tiziano_streak: number;
+    gaia_week_workouts: number;
+    tiziano_week_workouts: number;
     gaia_steps: number;
     tiziano_steps: number;
     gaia_sports: string;
@@ -269,6 +271,8 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
   const tizianoChallenge = challenges.find((row) => row.participant === "tiziano") ?? null;
   const gaiaStreak = consecutiveWorkoutDays(today, challengeHistory, "gaia");
   const tizianoStreak = consecutiveWorkoutDays(today, challengeHistory, "tiziano");
+  const gaiaWeekWorkouts = weeklyWorkoutCount(today, challengeHistory, "gaia");
+  const tizianoWeekWorkouts = weeklyWorkoutCount(today, challengeHistory, "tiziano");
   const healthTargets = targets as HealthTarget[];
   const mealPlanEntries = mealPlanRows as MealPlanEntryRow[];
   const stepsTarget = metricTarget(healthTargets, "steps", 10000, "steps");
@@ -298,6 +302,8 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
       tiziano_day: tizianoStreak,
       gaia_streak: gaiaStreak,
       tiziano_streak: tizianoStreak,
+      gaia_week_workouts: gaiaWeekWorkouts,
+      tiziano_week_workouts: tizianoWeekWorkouts,
       gaia_steps: Math.max(0, Number(gaiaChallenge?.steps ?? 0)),
       tiziano_steps: Math.max(0, Number(tizianoChallenge?.steps ?? 0)),
       gaia_sports: String(gaiaChallenge?.sports ?? ""),
@@ -442,6 +448,23 @@ function consecutiveWorkoutDays(
     cursor = addLocalDays(cursor, -1);
   }
   return streak;
+}
+
+function weeklyWorkoutCount(
+  today: string,
+  rows: Array<Pick<ChallengeLog, "date" | "participant" | "workouts">>,
+  participant: ChallengeLog["participant"]
+): number {
+  const todayIndex = localDateIndex(today);
+  const weekday = new Date(todayIndex * 86400000).getUTCDay();
+  const daysSinceMonday = weekday === 0 ? 6 : weekday - 1;
+  const weekStartIndex = todayIndex - daysSinceMonday;
+  return rows
+    .filter((row) => {
+      const rowIndex = localDateIndex(row.date);
+      return row.participant === participant && rowIndex >= weekStartIndex && rowIndex <= todayIndex;
+    })
+    .reduce((total, row) => total + Math.max(0, Number(row.workouts) || 0), 0);
 }
 
 function localDateIndex(value: string): number {
