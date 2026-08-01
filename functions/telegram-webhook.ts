@@ -146,7 +146,7 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
           content:
             [
               "Interpreta un messaggio Telegram, in italiano o inglese, e restituisci esclusivamente JSON valido.",
-              "Per le liste restituisci: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"elemento breve\"],\"all_lists\":false}. Usa grocery per spesa/lista della spesa/supermercato; todo per cose da fare/promemoria/compiti; workout per allenamento/palestra; meal per pasti/cibo. Verbi italiani: aggiungi/metti/inserisci/compra = add; segna/spunta/completa/fatto = complete; riapri/ripristina/non fatto = uncomplete; rimuovi/elimina/cancella/togli = delete; svuota/azzera/pulisci = clear. Per clear usa items: []. Rimuovi articoli e preposizioni dagli elementi, ad esempio 'Aggiungi il tè freddo alla spesa' deve produrre items:[\"tè freddo\"], list_key:\"grocery\".",
+              "Per le liste restituisci: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"elemento breve\"],\"all_lists\":false}. Usa grocery per spesa/lista della spesa/supermercato; todo per cose da fare/promemoria/compiti; workout per allenamento/palestra/piscina,nuoto,calcio,dragonboat,kayak; meal per pasti/cibo. Verbi italiani: aggiungi/metti/inserisci/compra = add; segna/spunta/completa/fatto = complete; riapri/ripristina/non fatto = uncomplete; rimuovi/elimina/cancella/togli = delete; svuota/azzera/pulisci = clear. Per clear usa items: []. Rimuovi articoli e preposizioni dagli elementi, ad esempio 'Aggiungi il tè freddo alla spesa' deve produrre items:[\"tè freddo\"], list_key:\"grocery\".",
               "For health targets return: {\"kind\":\"target\",\"action\":\"set_target\",\"metric\":\"steps|calories\",\"value\":12000,\"unit\":\"steps|kcal\"}.",
               "For 75 day challenge check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout\",\"value\":1}. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout.",
               "For today's meal plan made from saved recipes return: {\"kind\":\"meal_plan\",\"action\":\"add_meal|set_meal_plan|clear_meal_plan\",\"recipes\":[\"Saved Recipe Title\"]}. Use add_meal for adding/include/put another meal; use set_meal_plan only when replacing the whole plan.",
@@ -843,7 +843,7 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
     return { kind: "challenge", action: "add_water", value: roundOneDecimal(amount) };
   }
 
-  if (/\b(workout|exercise|training|gym|allenamento|palestra)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|completato|finito)\b/.test(lower)) {
+  if (/\b(workout|exercise|training|gym|allenamento|palestra,piscina,nuoto,calcio,dragonboat,kayak)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|completato|finito)\b/.test(lower)) {
     return { kind: "challenge", action: "add_workout", value: 1 };
   }
 

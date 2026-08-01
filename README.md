@@ -210,7 +210,12 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
     "gym",
     "allenamento",
     "allenamenti",
-    "palestra"
+    "palestra",
+    "piscina",
+    "nuoto",
+    "calcio",
+    "dragonboat",
+    "kayak"
   ],
   meal: [
     "meal",
