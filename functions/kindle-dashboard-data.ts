@@ -30,6 +30,9 @@ type HealthTarget = {
 
 type ChallengeLog = {
   date: string;
+  participant: "gaia" | "tiziano";
+  steps: number;
+  sports: string;
   water_l: string | number;
   sleep_hours: string | number;
   workouts: number;
@@ -103,6 +106,14 @@ type DashboardPayload = {
   challenge: {
     date: string;
     day: number;
+    gaia_day: number;
+    tiziano_day: number;
+    gaia_streak: number;
+    tiziano_streak: number;
+    gaia_steps: number;
+    tiziano_steps: number;
+    gaia_sports: string;
+    tiziano_sports: string;
     water_l: number;
     water_target_l: number;
     sleep_hours: number;
@@ -184,14 +195,16 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
       .limit(1),
     admin.database
       .from("challenge_daily_logs")
-      .select("date,water_l,sleep_hours,workouts,updated_at")
+      .select("date,participant,steps,sports,water_l,sleep_hours,workouts,updated_at")
       .eq("date", today)
-      .limit(1),
+      .in("participant", ["gaia", "tiziano"]),
     admin.database
       .from("challenge_daily_logs")
-      .select("date")
-      .order("date", { ascending: true })
-      .limit(1),
+      .select("date,participant,workouts")
+      .in("participant", ["gaia", "tiziano"])
+      .lte("date", today)
+      .order("date", { ascending: false })
+      .limit(150),
     admin.database
       .from("meal_plan_entries")
       .select("date,recipe_id,sort_order,updated_at")
@@ -250,9 +263,12 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
   const staleCompletedCutoff = Date.now() - COMPLETED_ITEM_HIDE_AFTER_MS;
   const plannerItems = (items as PlannerItem[]).filter((item) => shouldShowPlannerItem(item, staleCompletedCutoff));
   const health = firstRow<HealthSummary>(healthRows);
-  const challenge = firstRow<ChallengeLog>(challengeRows);
-  const challengeStart = firstRow<Pick<ChallengeLog, "date">>(challengeStartRows);
-  const challengeDay = challengeStart?.date ? challengeDayFor(today, challengeStart.date) : 1;
+  const challenges = challengeRows as ChallengeLog[];
+  const challengeHistory = challengeStartRows as Array<Pick<ChallengeLog, "date" | "participant" | "workouts">>;
+  const gaiaChallenge = challenges.find((row) => row.participant === "gaia") ?? null;
+  const tizianoChallenge = challenges.find((row) => row.participant === "tiziano") ?? null;
+  const gaiaStreak = consecutiveWorkoutDays(today, challengeHistory, "gaia");
+  const tizianoStreak = consecutiveWorkoutDays(today, challengeHistory, "tiziano");
   const healthTargets = targets as HealthTarget[];
   const mealPlanEntries = mealPlanRows as MealPlanEntryRow[];
   const stepsTarget = metricTarget(healthTargets, "steps", 10000, "steps");
@@ -277,12 +293,20 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
     },
     challenge: {
       date: today,
-      day: challengeDay,
-      water_l: Math.max(0, Number(challenge?.water_l ?? 0)),
+      day: tizianoStreak,
+      gaia_day: gaiaStreak,
+      tiziano_day: tizianoStreak,
+      gaia_streak: gaiaStreak,
+      tiziano_streak: tizianoStreak,
+      gaia_steps: Math.max(0, Number(gaiaChallenge?.steps ?? 0)),
+      tiziano_steps: Math.max(0, Number(tizianoChallenge?.steps ?? 0)),
+      gaia_sports: String(gaiaChallenge?.sports ?? ""),
+      tiziano_sports: String(tizianoChallenge?.sports ?? ""),
+      water_l: Math.max(0, Number(tizianoChallenge?.water_l ?? 0)),
       water_target_l: 3,
-      sleep_hours: Math.max(0, Number(challenge?.sleep_hours ?? 0)),
+      sleep_hours: Math.max(0, Number(tizianoChallenge?.sleep_hours ?? 0)),
       sleep_target_hours: 8,
-      workouts: Math.max(0, Number(challenge?.workouts ?? 0)),
+      workouts: Math.max(0, Number(tizianoChallenge?.workouts ?? 0)),
       workout_target: 2
     },
     lists: (["todo", "grocery"] as const).map((key) => ({
@@ -400,10 +424,24 @@ function addLocalDays(date: string, offset: number): string {
   return `${y}-${m}-${d}`;
 }
 
-function challengeDayFor(today: string, startDate: string): number {
-  const diff = localDateIndex(today) - localDateIndex(startDate);
-  if (!Number.isFinite(diff)) return 1;
-  return Math.max(1, Math.min(75, diff + 1));
+function consecutiveWorkoutDays(
+  today: string,
+  rows: Array<Pick<ChallengeLog, "date" | "participant" | "workouts">>,
+  participant: ChallengeLog["participant"]
+): number {
+  const completedDates = new Set(
+    rows
+      .filter((row) => row.participant === participant && Number(row.workouts) > 0)
+      .map((row) => row.date)
+  );
+  let cursor = today;
+  if (!completedDates.has(cursor)) cursor = addLocalDays(cursor, -1);
+  let streak = 0;
+  while (streak < 75 && completedDates.has(cursor)) {
+    streak += 1;
+    cursor = addLocalDays(cursor, -1);
+  }
+  return streak;
 }
 
 function localDateIndex(value: string): number {

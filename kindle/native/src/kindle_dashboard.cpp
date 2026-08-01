@@ -139,6 +139,12 @@ struct Dashboard {
   int calories;
   int protein_g;
   int challenge_day;
+  int gaia_day;
+  int tiziano_day;
+  int gaia_steps;
+  int tiziano_steps;
+  char gaia_sports[128];
+  char tiziano_sports[128];
   int water_tenths;
   int water_target_tenths;
   int sleep_tenths;
@@ -590,6 +596,18 @@ int parseDashboard(const char* json, Dashboard* dashboard) {
   dashboard->challenge_day = extractInt(json, NULL, "day", 1);
   if (dashboard->challenge_day < 1) dashboard->challenge_day = 1;
   if (dashboard->challenge_day > 75) dashboard->challenge_day = 75;
+  const int legacy_gaia_day = extractInt(json, NULL, "gaia_day", dashboard->challenge_day);
+  const int legacy_tiziano_day = extractInt(json, NULL, "tiziano_day", dashboard->challenge_day);
+  dashboard->gaia_day = extractInt(json, NULL, "gaia_streak", legacy_gaia_day);
+  dashboard->tiziano_day = extractInt(json, NULL, "tiziano_streak", legacy_tiziano_day);
+  dashboard->gaia_steps = extractInt(json, NULL, "gaia_steps", dashboard->steps);
+  dashboard->tiziano_steps = extractInt(json, NULL, "tiziano_steps", dashboard->steps);
+  extractString(json, NULL, "gaia_sports", dashboard->gaia_sports, sizeof(dashboard->gaia_sports), "");
+  extractString(json, NULL, "tiziano_sports", dashboard->tiziano_sports, sizeof(dashboard->tiziano_sports), "");
+  if (dashboard->gaia_day < 0) dashboard->gaia_day = 0;
+  if (dashboard->gaia_day > 75) dashboard->gaia_day = 75;
+  if (dashboard->tiziano_day < 0) dashboard->tiziano_day = 0;
+  if (dashboard->tiziano_day > 75) dashboard->tiziano_day = 75;
   dashboard->water_tenths = extractScaledInt(json, NULL, "water_l", 10, 0);
   dashboard->water_target_tenths = extractScaledInt(json, NULL, "water_target_l", 10, 30);
   dashboard->sleep_tenths = extractScaledInt(json, NULL, "sleep_hours", 10, 0);
@@ -1266,7 +1284,7 @@ void drawRadialMetric(Canvas* canvas, int x, int y, int w, int h, const char* la
   char metric[80];
   formatNumber(value, value_text, sizeof(value_text));
   formatNumber(target, target_text, sizeof(target_text));
-  const int metric_scale = w < 260 ? 2 : 3;
+  const int metric_scale = w < 420 ? 2 : 3;
   if (w < 260) snprintf(metric, sizeof(metric), "%s / %s", value_text, target_text);
   else snprintf(metric, sizeof(metric), "%s / %s %s", value_text, target_text, unit);
   drawTextCentered(canvas, cx, y + h - 38, w - 18, metric, metric_scale, 0);
@@ -1354,52 +1372,67 @@ void drawRadialMetricTenths(Canvas* canvas, int x, int y, int w, int h, const ch
   drawTextCentered(canvas, cx, y + h - 38, w - 18, metric, metric_scale, 0);
 }
 
-void drawChallengeStreakCard(Canvas* canvas, int x, int y, int w, int h, int current_day) {
+void drawChallengeStreakCard(Canvas* canvas, int x, int y, int w, int h, const char* title, int current_day) {
   strokeRect(canvas, x, y, w, h, 3, 0);
-  const int title_scale = textWidth("STREAK", 4) <= w - 24 ? 4 : 3;
-  drawTextCentered(canvas, x + w / 2, y + 20, w - 24, "STREAK", title_scale, 0);
-  line(canvas, x + 14, y + 62, x + w - 14, y + 62, 2, 0);
+  const int title_scale = textWidth(title, 4) <= w - 24 ? 4 : 3;
+  drawTextCentered(canvas, x + w / 2, y + 14, w - 24, title, title_scale, 0);
+  line(canvas, x + 14, y + 56, x + w - 14, y + 56, 2, 0);
+  char streak_text[24];
+  snprintf(streak_text, sizeof(streak_text), "%d", current_day < 0 ? 0 : current_day);
+  drawTextCentered(canvas, x + w / 2, y + 70, w - 24, streak_text, 5, 0);
+  drawTextCentered(canvas, x + w / 2, y + h - 34, w - 24, "GIORNI CONSECUTIVI", 2, 0);
+}
 
-  char day_text[32];
-  snprintf(day_text, sizeof(day_text), "%d / 75", current_day);
-  drawTextCentered(canvas, x + w / 2, y + 84, w - 24, day_text, 3, 0);
-
-  const int columns = 5;
-  const int rows = 15;
-  const int min_gap = 3;
-  const int max_grid_w = w - 24;
-  const int max_grid_h = h - 172;
-  int square = (max_grid_h - (rows - 1) * min_gap) / rows;
-  const int square_by_w = max_grid_w / columns;
-  if (square > square_by_w) square = square_by_w;
-  if (square > 7) square -= 3;
-  else if (square > 5) square -= 2;
-  if (square < 4) square = 4;
-  int gap_x = columns > 1 ? (max_grid_w - columns * square) / (columns - 1) : 0;
-  if (gap_x < min_gap) gap_x = min_gap;
-  const int gap_y = min_gap;
-  const int grid_h = rows * square + (rows - 1) * gap_y;
-  const int grid_x = x + 12;
-  const int grid_y = y + 132 + (max_grid_h - grid_h) / 2;
-  const int clamped_day = current_day < 1 ? 1 : (current_day > 75 ? 75 : current_day);
-
-  for (int day = 1; day <= 75; day++) {
-    const int index = day - 1;
-    const int column = index % columns;
-    const int row = index / columns;
-    const int cell_x = grid_x + column * (square + gap_x);
-    const int cell_y = grid_y + row * (square + gap_y);
-    const int completed = day <= clamped_day;
-    const int current = day == clamped_day;
-    if (completed) {
-      fillRect(canvas, cell_x, cell_y, square, square, 0);
-    } else {
-      fillRect(canvas, cell_x, cell_y, square, square, current ? 212 : 244);
-      strokeRect(canvas, cell_x, cell_y, square, square, current ? 2 : 1, 0);
-    }
+void drawSportsCard(Canvas* canvas, int x, int y, int w, int h, const char* title, const char* sports) {
+  strokeRect(canvas, x, y, w, h, 3, 0);
+  drawTextCentered(canvas, x + w / 2, y + 14, w - 24, title, 3, 0);
+  line(canvas, x + 14, y + 56, x + w - 14, y + 56, 2, 0);
+  if (!sports || !sports[0]) {
+    drawTextCentered(canvas, x + w / 2, y + 92, w - 36, "NESSUNA ATTIVITA OGGI", 2, 0);
+    return;
   }
+  char activities[128];
+  upperCopy(activities, sizeof(activities), sports);
+  char* activity = activities;
+  int row = 0;
+  while (activity && *activity && row < 2) {
+    char* separator = strchr(activity, ',');
+    if (separator) *separator = '\0';
+    while (*activity == ' ') activity++;
+    if (*activity) {
+      drawTextCentered(canvas, x + w / 2, y + 86 + row * 50, w - 48, activity, 3, 0);
+      row++;
+    }
+    activity = separator ? separator + 1 : NULL;
+  }
+}
 
-  drawTextCentered(canvas, x + w / 2, y + h - 38, w - 24, "75 MEDIUM", 2, 0);
+void drawPersonStepsCard(Canvas* canvas, int x, int y, int w, int h, const char* title, int value, int target, const char* unit) {
+  strokeRect(canvas, x, y, w, h, 2, 0);
+  drawTextCentered(canvas, x + w / 2, y + 14, w - 24, title, 3, 0);
+  line(canvas, x + 10, y + 52, x + w - 10, y + 52, 2, 0);
+
+  const int percent = target > 0 ? (value * 100) / target : 0;
+  const int clamped = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+  char percent_text[24];
+  snprintf(percent_text, sizeof(percent_text), "%d%%", clamped);
+  drawTextCentered(canvas, x + w / 2, y + 66, w - 24, percent_text, 3, 0);
+
+  const int track_x = x + 24;
+  const int track_y = y + 112;
+  const int track_w = w - 48;
+  const int track_h = 16;
+  fillRect(canvas, track_x, track_y, track_w, track_h, 224);
+  strokeRect(canvas, track_x, track_y, track_w, track_h, 1, 0);
+  fillRect(canvas, track_x, track_y, track_w * clamped / 100, track_h, 0);
+
+  char value_text[32];
+  char target_text[32];
+  char metric[80];
+  formatNumber(value, value_text, sizeof(value_text));
+  formatNumber(target, target_text, sizeof(target_text));
+  snprintf(metric, sizeof(metric), "%s / %s %s", value_text, target_text, unit);
+  drawTextCentered(canvas, x + w / 2, y + h - 36, w - 24, metric, 2, 0);
 }
 
 void drawImageCard(Canvas* canvas, int x, int y, int w, int h, const char* image_path, const char* fallback_path) {
@@ -1465,14 +1498,14 @@ void drawMealPlannerTile(Canvas* canvas, int x, int y, int w, int h) {
   drawTextCentered(canvas, x + w / 2, y + 14, w - 24, "MEAL PLANNER", 4, 0);
 }
 
-void drawChallengeTile(Canvas* canvas, int x, int y, int size) {
-  strokeRect(canvas, x, y, size, size, 3, 0);
-  Rect tile_rect = {x, y, size, size};
+void drawChallengeTile(Canvas* canvas, int x, int y, int w, int h) {
+  strokeRect(canvas, x, y, w, h, 3, 0);
+  Rect tile_rect = {x, y, w, h};
   addTouchRegion(tile_rect, kTouchOpenChallenge, -1, -1, "", 0);
   const int art_x = x + 3;
   const int art_y = y + 3;
-  const int art_w = size - 6;
-  const int art_h = size - 6;
+  const int art_w = w - 6;
+  const int art_h = h - 6;
   if (art_h > 24) {
     drawPgmImageCover(canvas, art_x, art_y, art_w, art_h, kChallengeCoverPath, kChallengeCoverLocalPath, framebufferInvertForVisibleImage(0));
   }
@@ -1878,30 +1911,27 @@ void drawChallengeDashboard(Canvas* canvas, const Dashboard* dashboard, const ch
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
 
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "SFIDA 75 GIORNI");
-  char day_text[40];
-  snprintf(day_text, sizeof(day_text), "GIORNO %d // GIORNO CORRENTE", dashboard->challenge_day);
-  drawTextClipped(canvas, shell_x + 36, sub_y + 88, shell_w - 72, day_text, 3, 0);
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "ESERCIZIO");
+  drawTextClipped(canvas, shell_x + 36, sub_y + 88, shell_w - 72, "PROGRESSI PERSONALI", 3, 0);
 
   const int gap = 10;
   const int content_x = shell_x + 18;
   const int content_y = sub_y + 132;
   const int content_w = shell_w - 36;
   const int content_h = shell_y + shell_h - content_y - 18;
-  const int center_w = (content_w - gap * 2) / 4;
-  const int side_w = (content_w - center_w - gap * 2) / 2;
-  const int left_x = content_x;
-  const int center_x = left_x + side_w + gap;
-  const int right_x = center_x + center_w + gap;
-  const int card_h = (content_h - gap * 2) / 3;
+  const int steps_h = content_h / 4;
+  const int streak_y = content_y + steps_h + gap;
+  const int streak_h = 164;
+  const int sports_y = streak_y + streak_h + gap;
+  const int sports_h = content_y + content_h - sports_y;
+  const int column_w = (content_w - gap) / 2;
 
-  drawRadialMetric(canvas, left_x, content_y, side_w, card_h, "PROTEINE", dashboard->protein_g, 100, "g");
-  drawRadialMetricTenths(canvas, left_x, content_y + card_h + gap, side_w, card_h, "ACQUA", dashboard->water_tenths, dashboard->water_target_tenths, "L");
-  drawRadialMetricTenths(canvas, left_x, content_y + (card_h + gap) * 2, side_w, card_h, "SONNO", dashboard->sleep_tenths, dashboard->sleep_target_tenths, "h");
-  drawChallengeStreakCard(canvas, center_x, content_y, center_w, content_h, dashboard->challenge_day);
-  drawRadialMetric(canvas, right_x, content_y, side_w, card_h, "ALLENAMENTO", dashboard->workouts, dashboard->workout_target, "fatti");
-  drawRadialMetric(canvas, right_x, content_y + card_h + gap, side_w, card_h, "PASSI", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
-  drawRadialMetric(canvas, right_x, content_y + (card_h + gap) * 2, side_w, card_h, "CALORIE", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
+  drawPersonStepsCard(canvas, content_x, content_y, column_w, steps_h, "PASSI GAIA", dashboard->gaia_steps, dashboard->steps_target, dashboard->steps_unit);
+  drawPersonStepsCard(canvas, content_x + column_w + gap, content_y, column_w, steps_h, "PASSI TIZIANO", dashboard->tiziano_steps, dashboard->steps_target, dashboard->steps_unit);
+  drawChallengeStreakCard(canvas, content_x, streak_y, column_w, streak_h, "STREAK GAIA", dashboard->gaia_day);
+  drawChallengeStreakCard(canvas, content_x + column_w + gap, streak_y, column_w, streak_h, "STREAK TIZIANO", dashboard->tiziano_day);
+  drawSportsCard(canvas, content_x, sports_y, column_w, sports_h, "SPORT GAIA", dashboard->gaia_sports);
+  drawSportsCard(canvas, content_x + column_w + gap, sports_y, column_w, sports_h, "SPORT TIZIANO", dashboard->tiziano_sports);
 }
 
 void drawCurrentDashboard(Canvas* canvas, const Dashboard* dashboard, const char* status) {
@@ -2006,39 +2036,23 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   drawTextClipped(canvas, shell_x + 28, shell_y + 102, exit_rect.x - shell_x - 44, updated, 2, 0);
 
   const int gap = 8;
-  const int stat_y = shell_y + 10 + kHeaderHeight + gap;
-  const int stat_h = shell_h < 900 ? 220 : 252;
-  const int stat_w = (shell_w - 20 - gap * 2) / 3;
-  drawImageCard(canvas, shell_x + 10, stat_y, stat_w, stat_h, kProfileCardPath, kProfileCardLocalPath);
-  drawRadialMetric(canvas, shell_x + 10 + stat_w + gap, stat_y, stat_w, stat_h, "PASSI", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
-  drawRadialMetric(canvas, shell_x + 10 + (stat_w + gap) * 2, stat_y, stat_w, stat_h, "CALORIE", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
+  const int grid_x = shell_x + 10;
+  const int grid_y = shell_y + 10 + kHeaderHeight + gap;
+  const int grid_w = shell_w - 20;
+  const int grid_h = shell_y + shell_h - grid_y - 10;
+  const int card_w = (grid_w - gap) / 2;
+  const int card_h = (grid_h - gap) / 2;
+  const int right_x = grid_x + card_w + gap;
+  const int bottom_y = grid_y + card_h + gap;
 
-  const int footer_h = 44;
-  const int lists_y = stat_y + stat_h + gap;
-  const int lists_h = shell_y + shell_h - lists_y - footer_h - gap - 10;
-  const int list_w = (shell_w - 20 - gap) / 2;
+  drawImageCard(canvas, grid_x, grid_y, card_w, card_h, kProfileCardPath, kProfileCardLocalPath);
   if (dashboard->list_count > 0) {
-    int challenge_side = list_w;
-    if (lists_h < challenge_side + 128) challenge_side = lists_h - 128;
-    if (challenge_side < 160) challenge_side = 160;
-    const int challenge_gap = gap;
-    const int chores_h = lists_h - challenge_side - challenge_gap;
-    drawListCard(canvas, shell_x + 10, lists_y, list_w, chores_h, &dashboard->lists[0], 0);
-    drawChallengeTile(canvas, shell_x + 10, lists_y + chores_h + challenge_gap, challenge_side);
+    drawListCard(canvas, right_x, grid_y, card_w, card_h, &dashboard->lists[0], 0);
   }
+  drawChallengeTile(canvas, grid_x, bottom_y, card_w, card_h);
   if (dashboard->list_count > 1) {
-    const int right_x = shell_x + 10 + list_w + gap;
-    int challenge_side = list_w;
-    if (lists_h < challenge_side + 128) challenge_side = lists_h - 128;
-    if (challenge_side < 160) challenge_side = 160;
-    int meal_tile_h = lists_h - challenge_side - gap;
-    const int grocery_h = lists_h - meal_tile_h - gap;
-    drawMealPlannerTile(canvas, right_x, lists_y, list_w, meal_tile_h);
-    drawListCard(canvas, right_x, lists_y + meal_tile_h + gap, list_w, grocery_h, &dashboard->lists[1], 1);
+    drawListCard(canvas, right_x, bottom_y, card_w, card_h, &dashboard->lists[1], 1);
   }
-
-  doubleRect(canvas, shell_x + 10, shell_y + shell_h - footer_h - 10, shell_w - 20, footer_h, 0);
-  drawTextClipped(canvas, shell_x + 28, shell_y + shell_h - footer_h - 2, shell_w - 56, "TELEGRAM AGGIORNA LE LISTE // AUTO REFRESH 15M", 3, 0);
 }
 
 int writePgm(const char* path, const Canvas* canvas) {

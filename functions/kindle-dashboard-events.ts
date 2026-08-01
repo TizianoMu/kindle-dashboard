@@ -29,6 +29,9 @@ type HealthTarget = {
 
 type ChallengeLog = {
   date: string;
+  participant: "gaia" | "tiziano";
+  steps: number;
+  sports: string;
   water_l: string | number;
   sleep_hours: string | number;
   workouts: number;
@@ -52,7 +55,7 @@ type DashboardData = {
   items: PlannerItem[];
   health: HealthSummary | null;
   targets: HealthTarget[];
-  challenge: ChallengeLog | null;
+  challenge: ChallengeLog[];
   mealPlan: MealPlanEntry[];
   recipes: RecipeVersion[];
 };
@@ -161,9 +164,9 @@ async function loadDashboardData(): Promise<DashboardData> {
       .limit(1),
     admin.database
       .from("challenge_daily_logs")
-      .select("date,water_l,sleep_hours,workouts,updated_at")
+      .select("date,participant,steps,sports,water_l,sleep_hours,workouts,updated_at")
       .eq("date", today)
-      .limit(1),
+      .in("participant", ["gaia", "tiziano"]),
     admin.database
       .from("health_targets")
       .select("metric,label,target_value,unit,updated_at")
@@ -202,7 +205,7 @@ async function loadDashboardData(): Promise<DashboardData> {
     items: items as PlannerItem[],
     health: firstRow<HealthSummary>(healthRows),
     targets: targets as HealthTarget[],
-    challenge: firstRow<ChallengeLog>(challengeRows),
+    challenge: challengeRows as ChallengeLog[],
     mealPlan: mealPlanRows as MealPlanEntry[],
     recipes: recipeRows as RecipeVersion[]
   };

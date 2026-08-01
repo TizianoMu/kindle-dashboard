@@ -20,9 +20,12 @@ type HealthTargetAction = {
 
 type ChallengeAction = {
   kind: "challenge";
-  action: "add_water" | "set_sleep" | "add_workout";
+  action: "add_water" | "set_sleep" | "add_workout" | "set_steps";
   value: number;
+  sport?: string;
 };
+
+type Participant = "gaia" | "tiziano";
 
 type RecipeIngredientInput = {
   name: string;
@@ -90,6 +93,7 @@ export default async function(req: Request): Promise<Response> {
   if (!allowedChatIds().includes(chatId)) {
     return jsonResponse({ ok: true, ignored: true, reason: "chat_not_allowed" });
   }
+  const participant = participantForChat(chatId);
 
   const text = update.message?.text?.trim();
   if (!text) {
@@ -110,7 +114,7 @@ export default async function(req: Request): Promise<Response> {
   });
 
   const applyStarted = timeMs();
-  const summary = await applyTelegramAction(admin, action);
+  const summary = await applyTelegramAction(admin, action, participant);
   const applyMs = elapsedMs(applyStarted);
   sendTelegramMessageInBackground(chatId, summary);
   logTiming("telegram-webhook", {
@@ -148,7 +152,7 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
               "Interpreta un messaggio Telegram, in italiano o inglese, e restituisci esclusivamente JSON valido.",
               "Per le liste restituisci: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"elemento breve\"],\"all_lists\":false}. Usa grocery per spesa/lista della spesa/supermercato; todo per cose da fare/promemoria/compiti; workout per allenamento/palestra/piscina,nuoto,calcio,dragonboat,kayak; meal per pasti/cibo. Verbi italiani: aggiungi/metti/inserisci/compra = add; segna/spunta/completa/fatto = complete; riapri/ripristina/non fatto = uncomplete; rimuovi/elimina/cancella/togli = delete; svuota/azzera/pulisci = clear. Per clear usa items: []. Rimuovi articoli e preposizioni dagli elementi, ad esempio 'Aggiungi il tè freddo alla spesa' deve produrre items:[\"tè freddo\"], list_key:\"grocery\".",
               "For health targets return: {\"kind\":\"target\",\"action\":\"set_target\",\"metric\":\"steps|calories\",\"value\":12000,\"unit\":\"steps|kcal\"}.",
-              "For 75 day challenge check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout\",\"value\":1}. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout.",
+              "For personal exercise check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout|set_steps\",\"value\":1,\"sport\":\"palestra|nuoto|calcio|kayak|dragonboat|corsa|bici|altro\"}. Include sport only for add_workout and infer it from the message. Use set_steps for messages such as 'passi 8432' or 'I walked 8432 steps'. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout. Messages explicitly mentioning target, goal or obiettivo are health targets, not personal step check-ins.",
               "For today's meal plan made from saved recipes return: {\"kind\":\"meal_plan\",\"action\":\"add_meal|set_meal_plan|clear_meal_plan\",\"recipes\":[\"Saved Recipe Title\"]}. Use add_meal for adding/include/put another meal; use set_meal_plan only when replacing the whole plan.",
               "For rating a saved meal or recipe return: {\"kind\":\"recipe_rating\",\"action\":\"rate_recipe\",\"title\":\"Saved Recipe Title\",\"rating\":4.5}. Rating is out of 5.",
               "For recipes return: {\"kind\":\"recipe\",\"action\":\"add_recipe\",\"title\":\"Recipe Title\",\"total_calories\":429,\"carbs_g\":47.3,\"fat_g\":10.2,\"protein_g\":38.5,\"rating\":4,\"instructions\":\"optional steps\",\"ingredients\":[{\"name\":\"Paneer\",\"amount\":\"100 g\",\"calories\":163}]}. Rating is out of 5."
@@ -178,8 +182,11 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
   }
 }
 
-async function applyTelegramAction(admin: any, action: TelegramAction): Promise<string> {
-  if (isChallengeAction(action)) return applyChallengeAction(admin, action);
+async function applyTelegramAction(admin: any, action: TelegramAction, participant: Participant | null): Promise<string> {
+  if (isChallengeAction(action)) {
+    if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
+    return applyChallengeAction(admin, action, participant);
+  }
   if (isMealPlanAction(action)) return applyMealPlanAction(admin, action);
   if (isTargetAction(action)) return applyHealthTargetAction(admin, action);
   if (isRecipeRatingAction(action)) return applyRecipeRatingAction(admin, action);
@@ -260,12 +267,13 @@ async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<
   return `${verb}: ${selected.map((recipe) => recipe.title).join(", ")}.${suffix}`;
 }
 
-async function applyChallengeAction(admin: any, action: ChallengeAction): Promise<string> {
+async function applyChallengeAction(admin: any, action: ChallengeAction, participant: Participant): Promise<string> {
   const date = dashboardLocalDate();
   const { data: existingRows, error: selectError } = await admin.database
     .from("challenge_daily_logs")
-    .select("date,water_l,sleep_hours,workouts")
+    .select("date,participant,steps,water_l,sleep_hours,workouts,sports")
     .eq("date", date)
+    .eq("participant", participant)
     .limit(1);
   if (selectError) throw selectError;
 
@@ -273,10 +281,14 @@ async function applyChallengeAction(admin: any, action: ChallengeAction): Promis
   const currentWater = Math.max(0, Number(existing?.water_l ?? 0));
   const currentSleep = Math.max(0, Number(existing?.sleep_hours ?? 0));
   const currentWorkouts = Math.max(0, Number(existing?.workouts ?? 0));
+  const currentSteps = Math.max(0, Number(existing?.steps ?? 0));
+  const currentSports = parseStoredSports(existing?.sports);
   const next = {
+    steps: currentSteps,
     water_l: currentWater,
     sleep_hours: currentSleep,
-    workouts: currentWorkouts
+    workouts: currentWorkouts,
+    sports: currentSports.join(",")
   };
 
   if (action.action === "add_water") {
@@ -285,24 +297,31 @@ async function applyChallengeAction(admin: any, action: ChallengeAction): Promis
     next.sleep_hours = roundOneDecimal(action.value);
   } else if (action.action === "add_workout") {
     next.workouts = currentWorkouts + Math.max(1, Math.round(action.value));
+    const sport = normalizeSport(action.sport || "allenamento");
+    next.sports = [...new Set([...currentSports, sport])].join(",");
+  } else if (action.action === "set_steps") {
+    next.steps = Math.max(0, Math.round(action.value));
   }
 
   if (existing) {
     const { error } = await admin.database
       .from("challenge_daily_logs")
       .update(next)
-      .eq("date", date);
+      .eq("date", date)
+      .eq("participant", participant);
     if (error) throw error;
   } else {
     const { error } = await admin.database
       .from("challenge_daily_logs")
-      .insert([{ date, ...next }]);
+      .insert([{ date, participant, ...next }]);
     if (error) throw error;
   }
 
   if (action.action === "add_water") return `Registrati ${formatNumber(action.value)} L di acqua oggi (${formatNumber(next.water_l)}/3 L).`;
   if (action.action === "set_sleep") return `Sonno registrato: ${formatNumber(next.sleep_hours)}/8 ore.`;
-  return `Allenamento registrato: ${next.workouts}/2 oggi.`;
+  const participantName = participant === "gaia" ? "Gaia" : "Tiziano";
+  if (action.action === "set_steps") return `Passi ${participantName} registrati: ${formatNumber(next.steps)} oggi.`;
+  return `Allenamento ${participantName} registrato: ${normalizeSport(action.sport || "allenamento")} (${next.workouts} oggi).`;
 }
 
 async function applyPlannerAction(admin: any, action: PlannerAction): Promise<string> {
@@ -526,16 +545,26 @@ function requiredEnv(key: string): string {
   return value;
 }
 
-// TELEGRAM_ALLOWED_CHAT_ID holds one chat ID or a comma-separated list, so the
-// same bot can serve several chats (phone, family group). All of them share the
-// same planner rows: the schema has no per-chat ownership.
+// Planner rows remain shared, while exercise data is assigned from the chat ID.
 function allowedChatIds(): string[] {
-  const ids = requiredEnv("TELEGRAM_ALLOWED_CHAT_ID")
-    .split(",")
+  const ids = [
+    ...requiredEnv("TELEGRAM_ALLOWED_CHAT_ID").split(","),
+    Deno.env.get("TELEGRAM_GAIA_CHAT_ID") || "",
+    Deno.env.get("TELEGRAM_TIZIANO_CHAT_ID") || ""
+  ]
     .map((id) => id.trim())
     .filter((id) => id.length > 0);
   if (ids.length === 0) throw new Error("TELEGRAM_ALLOWED_CHAT_ID has no usable chat ID");
-  return ids;
+  return [...new Set(ids)];
+}
+
+function participantForChat(chatId: string): Participant | null {
+  const gaiaChatId = requiredEnv("TELEGRAM_GAIA_CHAT_ID").trim();
+  const tizianoChatId = requiredEnv("TELEGRAM_TIZIANO_CHAT_ID").trim();
+  if (gaiaChatId === tizianoChatId) throw new Error("Telegram participant chat IDs must be different");
+  if (chatId === gaiaChatId) return "gaia";
+  if (chatId === tizianoChatId) return "tiziano";
+  return null;
 }
 
 function timeMs(): number {
@@ -718,13 +747,14 @@ function validateChallengeAction(input: unknown): ChallengeAction | null {
   if (!input || typeof input !== "object") return null;
   const candidate = input as Partial<ChallengeAction>;
   if (candidate.kind !== "challenge") return null;
-  if (candidate.action !== "add_water" && candidate.action !== "set_sleep" && candidate.action !== "add_workout") return null;
+  if (candidate.action !== "add_water" && candidate.action !== "set_sleep" && candidate.action !== "add_workout" && candidate.action !== "set_steps") return null;
   const value = Number(candidate.value);
   if (!Number.isFinite(value) || value <= 0) return null;
   return {
     kind: "challenge",
     action: candidate.action,
-    value
+    value,
+    sport: candidate.action === "add_workout" ? normalizeSport(candidate.sport || "allenamento") : undefined
   };
 }
 
@@ -830,6 +860,12 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
 
+  if (/\b(step|steps|passo|passi)\b/.test(lower) && !/\b(target|goal|obiettivo|imposta|cambia|aggiorna)\b/.test(lower)) {
+    const steps = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:step|steps|passo|passi)\b/i)
+      ?? extractMacroNumber(normalized, /\b(?:step|steps|passo|passi)\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+    if (steps && steps > 0) return { kind: "challenge", action: "set_steps", value: Math.round(steps) };
+  }
+
   if (/\b(slept|sleep|dormito|sonno)\b/.test(lower)) {
     const hours = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:h|hr|hrs|hour|hours|ora|ore)\b/i)
       ?? extractMacroNumber(normalized, /\b(?:slept|sleep|dormito|sonno)\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
@@ -843,8 +879,8 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
     return { kind: "challenge", action: "add_water", value: roundOneDecimal(amount) };
   }
 
-  if (/\b(workout|exercise|training|gym|allenamento|palestra,piscina,nuoto,calcio,dragonboat,kayak)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|completato|finito)\b/.test(lower)) {
-    return { kind: "challenge", action: "add_workout", value: 1 };
+  if (/\b(workout|exercise|training|gym|allenamento|palestra|piscina|nuoto|calcio|dragonboat|kayak|corsa|running|bici|bicicletta|cycling)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|fatta|completato|completata|finito|finita)\b/.test(lower)) {
+    return { kind: "challenge", action: "add_workout", value: 1, sport: sportFromMessage(lower) };
   }
 
   return null;
@@ -1002,6 +1038,38 @@ function isChallengeAction(action: TelegramAction): action is ChallengeAction {
 
 function isMealPlanAction(action: TelegramAction): action is MealPlanAction {
   return (action as MealPlanAction).kind === "meal_plan";
+}
+
+function sportFromMessage(message: string): string {
+  const lower = message.toLowerCase();
+  if (/\b(palestra|gym)\b/.test(lower)) return "palestra";
+  if (/\b(nuoto|piscina|swim|swimming)\b/.test(lower)) return "nuoto";
+  if (/\b(calcio|football|soccer)\b/.test(lower)) return "calcio";
+  if (/\b(kayak)\b/.test(lower)) return "kayak";
+  if (/\b(dragon\s*boat|dragonboat)\b/.test(lower)) return "dragonboat";
+  if (/\b(corsa|correre|running|run)\b/.test(lower)) return "corsa";
+  if (/\b(bici|bicicletta|cycling|bike)\b/.test(lower)) return "bici";
+  return "allenamento";
+}
+
+function normalizeSport(value: string): string {
+  const inferred = sportFromMessage(String(value));
+  if (inferred !== "allenamento") return inferred;
+  const cleaned = String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9à-ÿ -]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 32);
+  return cleaned || "allenamento";
+}
+
+function parseStoredSports(value: unknown): string[] {
+  return [...new Set(String(value ?? "")
+    .split(",")
+    .map((sport) => sport.trim())
+    .filter(Boolean)
+    .map(normalizeSport))];
 }
 
 function formatNumber(value: number): string {

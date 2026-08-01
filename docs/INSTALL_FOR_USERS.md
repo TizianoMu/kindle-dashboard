@@ -174,7 +174,7 @@ update calorie goal to 2100
 change calories target = 1900
 ```
 
-### 75 Day Challenge Check-Ins
+### Exercise Check-Ins
 
 Log water:
 
@@ -197,7 +197,26 @@ Log a workout:
 workout done
 completed gym
 did exercise
+palestra fatta
+nuoto completato
+kayak fatto
 ```
+
+The exercise view shows today's recognized sports separately for Gaia and
+Tiziano. Supported names include palestra, nuoto, calcio, kayak, dragonboat,
+corsa, and bici; other explicit activity names are stored as written.
+
+Log personal steps:
+
+```text
+passi 8432
+ho fatto 10500 passi
+walked 9200 steps
+```
+
+Exercise and step messages are assigned automatically to Gaia or Tiziano from
+the Telegram chat ID configured in `TELEGRAM_GAIA_CHAT_ID` and
+`TELEGRAM_TIZIANO_CHAT_ID`. Planner and grocery lists remain shared.
 
 ### Today's Meal Plan
 
