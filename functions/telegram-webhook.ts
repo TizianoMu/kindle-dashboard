@@ -20,7 +20,7 @@ type HealthTargetAction = {
 
 type ChallengeAction = {
   kind: "challenge";
-  action: "add_water" | "set_sleep" | "add_workout" | "set_steps";
+  action: "add_water" | "set_sleep" | "add_workout" | "set_steps" | "undo_workout" | "remove_sport";
   value: number;
   sport?: string;
 };
@@ -152,7 +152,7 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
               "Interpreta un messaggio Telegram, in italiano o inglese, e restituisci esclusivamente JSON valido.",
               "Per le liste restituisci: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"elemento breve\"],\"all_lists\":false}. Usa grocery per spesa/lista della spesa/supermercato; todo per cose da fare/promemoria/compiti; workout per allenamento/palestra/piscina,nuoto,calcio,dragonboat,kayak; meal per pasti/cibo. Verbi italiani: aggiungi/metti/inserisci/compra = add; segna/spunta/completa/fatto = complete; riapri/ripristina/non fatto = uncomplete; rimuovi/elimina/cancella/togli = delete; svuota/azzera/pulisci = clear. Per clear usa items: []. Rimuovi articoli e preposizioni dagli elementi, ad esempio 'Aggiungi il tè freddo alla spesa' deve produrre items:[\"tè freddo\"], list_key:\"grocery\".",
               "For health targets return: {\"kind\":\"target\",\"action\":\"set_target\",\"metric\":\"steps|calories\",\"value\":12000,\"unit\":\"steps|kcal\"}.",
-              "For personal exercise check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout|set_steps\",\"value\":1,\"sport\":\"palestra|nuoto|calcio|kayak|dragonboat|corsa|bici|altro\"}. Include sport only for add_workout and infer it from the message. Use set_steps for messages such as 'passi 8432' or 'I walked 8432 steps'. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout. Messages explicitly mentioning target, goal or obiettivo are health targets, not personal step check-ins.",
+              "For personal exercise check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout|set_steps|undo_workout|remove_sport\",\"value\":1,\"sport\":\"palestra|nuoto|calcio|kayak|dragonboat|corsa|bici|altro\"}. Include sport for add_workout and remove_sport. Use undo_workout for 'annulla ultimo allenamento', remove_sport for 'rimuovi kayak di oggi', and set_steps for 'correggi passi a 8432'. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout. Messages explicitly mentioning target, goal or obiettivo are health targets, not personal step check-ins.",
               "For today's meal plan made from saved recipes return: {\"kind\":\"meal_plan\",\"action\":\"add_meal|set_meal_plan|clear_meal_plan\",\"recipes\":[\"Saved Recipe Title\"]}. Use add_meal for adding/include/put another meal; use set_meal_plan only when replacing the whole plan.",
               "For rating a saved meal or recipe return: {\"kind\":\"recipe_rating\",\"action\":\"rate_recipe\",\"title\":\"Saved Recipe Title\",\"rating\":4.5}. Rating is out of 5.",
               "For recipes return: {\"kind\":\"recipe\",\"action\":\"add_recipe\",\"title\":\"Recipe Title\",\"total_calories\":429,\"carbs_g\":47.3,\"fat_g\":10.2,\"protein_g\":38.5,\"rating\":4,\"instructions\":\"optional steps\",\"ingredients\":[{\"name\":\"Paneer\",\"amount\":\"100 g\",\"calories\":163}]}. Rating is out of 5."
@@ -278,6 +278,10 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
   if (selectError) throw selectError;
 
   const existing = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
+  const participantName = participant === "gaia" ? "Gaia" : "Tiziano";
+  if (!existing && (action.action === "undo_workout" || action.action === "remove_sport")) {
+    return `Nessun allenamento di ${participantName} da correggere oggi.`;
+  }
   const currentWater = Math.max(0, Number(existing?.water_l ?? 0));
   const currentSleep = Math.max(0, Number(existing?.sleep_hours ?? 0));
   const currentWorkouts = Math.max(0, Number(existing?.workouts ?? 0));
@@ -301,6 +305,20 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
     next.sports = [...new Set([...currentSports, sport])].join(",");
   } else if (action.action === "set_steps") {
     next.steps = Math.max(0, Math.round(action.value));
+  } else if (action.action === "undo_workout") {
+    if (currentWorkouts <= 0) return `Nessun allenamento di ${participantName} da annullare oggi.`;
+    next.workouts = currentWorkouts - 1;
+    const remainingSports = [...currentSports];
+    remainingSports.pop();
+    next.sports = remainingSports.join(",");
+  } else if (action.action === "remove_sport") {
+    const sport = normalizeSport(action.sport || "");
+    const sportIndex = currentSports.indexOf(sport);
+    if (sportIndex < 0) return `${sport} non risulta tra gli allenamenti di ${participantName} di oggi.`;
+    const remainingSports = [...currentSports];
+    remainingSports.splice(sportIndex, 1);
+    next.sports = remainingSports.join(",");
+    next.workouts = Math.max(0, currentWorkouts - 1);
   }
 
   if (existing) {
@@ -319,8 +337,9 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
 
   if (action.action === "add_water") return `Registrati ${formatNumber(action.value)} L di acqua oggi (${formatNumber(next.water_l)}/3 L).`;
   if (action.action === "set_sleep") return `Sonno registrato: ${formatNumber(next.sleep_hours)}/8 ore.`;
-  const participantName = participant === "gaia" ? "Gaia" : "Tiziano";
   if (action.action === "set_steps") return `Passi ${participantName} registrati: ${formatNumber(next.steps)} oggi.`;
+  if (action.action === "undo_workout") return `Ultimo allenamento di ${participantName} annullato (${next.workouts} oggi).`;
+  if (action.action === "remove_sport") return `${normalizeSport(action.sport || "")} rimosso dagli allenamenti di ${participantName} di oggi.`;
   return `Allenamento ${participantName} registrato: ${normalizeSport(action.sport || "allenamento")} (${next.workouts} oggi).`;
 }
 
@@ -747,14 +766,19 @@ function validateChallengeAction(input: unknown): ChallengeAction | null {
   if (!input || typeof input !== "object") return null;
   const candidate = input as Partial<ChallengeAction>;
   if (candidate.kind !== "challenge") return null;
-  if (candidate.action !== "add_water" && candidate.action !== "set_sleep" && candidate.action !== "add_workout" && candidate.action !== "set_steps") return null;
+  if (candidate.action !== "add_water" && candidate.action !== "set_sleep" && candidate.action !== "add_workout" && candidate.action !== "set_steps" && candidate.action !== "undo_workout" && candidate.action !== "remove_sport") return null;
   const value = Number(candidate.value);
   if (!Number.isFinite(value) || value <= 0) return null;
+  if (candidate.action === "remove_sport" && (typeof candidate.sport !== "string" || !candidate.sport.trim())) return null;
   return {
     kind: "challenge",
     action: candidate.action,
     value,
-    sport: candidate.action === "add_workout" ? normalizeSport(candidate.sport || "allenamento") : undefined
+    sport: candidate.action === "add_workout"
+      ? normalizeSport(candidate.sport || "allenamento")
+      : candidate.action === "remove_sport"
+        ? normalizeSport(candidate.sport || "")
+        : undefined
   };
 }
 
@@ -860,9 +884,18 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
 
+  if (/\b(annulla|annullare|undo|cancella)\b/.test(lower) && /\b(ultimo|ultima|last)\b/.test(lower) && /\b(workout|exercise|training|allenamento|attivita)\b/.test(lower)) {
+    return { kind: "challenge", action: "undo_workout", value: 1 };
+  }
+
+  if (/\b(rimuovi|rimuovere|elimina|eliminare|cancella|togli|remove|delete)\b/.test(lower) && /\b(oggi|today)\b/.test(lower)) {
+    const sport = sportFromMessage(lower);
+    if (sport !== "allenamento") return { kind: "challenge", action: "remove_sport", value: 1, sport };
+  }
+
   if (/\b(step|steps|passo|passi)\b/.test(lower) && !/\b(target|goal|obiettivo|imposta|cambia|aggiorna)\b/.test(lower)) {
     const steps = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:step|steps|passo|passi)\b/i)
-      ?? extractMacroNumber(normalized, /\b(?:step|steps|passo|passi)\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+      ?? extractMacroNumber(normalized, /\b(?:step|steps|passo|passi)(?:\s+(?:a|ad|to))?\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
     if (steps && steps > 0) return { kind: "challenge", action: "set_steps", value: Math.round(steps) };
   }
 

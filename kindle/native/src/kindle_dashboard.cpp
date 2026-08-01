@@ -692,8 +692,8 @@ void formatNumber(int value, char* out, size_t size) {
 }
 
 void formatDisplayDate(const char* iso, const char* status, char* out, size_t size) {
-  static const char* months[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
-  static const char* weekdays[] = {"SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"};
+  static const char* months[] = {"GEN", "FEB", "MAR", "APR", "MAG", "GIU", "LUG", "AGO", "SET", "OTT", "NOV", "DIC"};
+  static const char* weekdays[] = {"Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"};
   int year = 0;
   int month = 0;
   int day = 0;

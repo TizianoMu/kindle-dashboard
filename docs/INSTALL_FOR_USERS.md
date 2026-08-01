@@ -218,6 +218,18 @@ Exercise and step messages are assigned automatically to Gaia or Tiziano from
 the Telegram chat ID configured in `TELEGRAM_GAIA_CHAT_ID` and
 `TELEGRAM_TIZIANO_CHAT_ID`. Planner and grocery lists remain shared.
 
+Correct today's personal data:
+
+```text
+correggi passi a 8200
+annulla ultimo allenamento
+rimuovi kayak di oggi
+```
+
+Correcting steps replaces today's value. Undoing a workout decreases today's
+count and removes the last listed sport. Removing a named sport only changes
+the count when that sport is present in today's activities.
+
 ### Today's Meal Plan
 
 Meal plan commands match saved recipe titles by partial title. Use these after
