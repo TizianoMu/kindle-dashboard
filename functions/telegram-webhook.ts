@@ -27,6 +27,11 @@ type ChallengeAction = {
 
 type Participant = "gaia" | "tiziano";
 
+type SummaryAction = {
+  kind: "summary";
+  action: "today";
+};
+
 type RecipeIngredientInput = {
   name: string;
   amount: string;
@@ -59,7 +64,7 @@ type MealPlanAction = {
   recipes: string[];
 };
 
-type TelegramAction = PlannerAction | HealthTargetAction | RecipeAction | RecipeRatingAction | ChallengeAction | MealPlanAction;
+type TelegramAction = PlannerAction | HealthTargetAction | RecipeAction | RecipeRatingAction | ChallengeAction | MealPlanAction | SummaryAction;
 
 type TelegramUpdate = {
   message?: {
@@ -183,6 +188,10 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
 }
 
 async function applyTelegramAction(admin: any, action: TelegramAction, participant: Participant | null): Promise<string> {
+  if (isSummaryAction(action)) {
+    if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
+    return applyTodaySummary(admin, participant);
+  }
   if (isChallengeAction(action)) {
     if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
     return applyChallengeAction(admin, action, participant);
@@ -192,6 +201,53 @@ async function applyTelegramAction(admin: any, action: TelegramAction, participa
   if (isRecipeRatingAction(action)) return applyRecipeRatingAction(admin, action);
   if (isRecipeAction(action)) return applyRecipeAction(admin, action);
   return applyPlannerAction(admin, action);
+}
+
+async function applyTodaySummary(admin: any, participant: Participant): Promise<string> {
+  const date = dashboardLocalDate();
+  const [todayResult, historyResult, targetResult] = await Promise.all([
+    admin.database
+      .from("challenge_daily_logs")
+      .select("date,steps,workouts,sports")
+      .eq("date", date)
+      .eq("participant", participant)
+      .limit(1),
+    admin.database
+      .from("challenge_daily_logs")
+      .select("date,workouts")
+      .eq("participant", participant)
+      .lte("date", date)
+      .order("date", { ascending: false })
+      .limit(75),
+    admin.database
+      .from("health_targets")
+      .select("target_value")
+      .eq("metric", "steps")
+      .limit(1)
+  ]);
+  if (todayResult.error) throw todayResult.error;
+  if (historyResult.error) throw historyResult.error;
+  if (targetResult.error) throw targetResult.error;
+
+  const today = Array.isArray(todayResult.data) ? todayResult.data[0] : null;
+  const history = Array.isArray(historyResult.data) ? historyResult.data : [];
+  const target = Array.isArray(targetResult.data) ? targetResult.data[0] : null;
+  const steps = Math.max(0, Number(today?.steps ?? 0));
+  const stepsTarget = Math.max(0, Number(target?.target_value ?? 10000));
+  const workouts = Math.max(0, Number(today?.workouts ?? 0));
+  const sports = parseStoredSports(today?.sports);
+  const streak = consecutiveWorkoutDays(date, history);
+  const weekWorkouts = weeklyWorkoutCount(date, history);
+  const name = participant === "gaia" ? "GAIA" : "TIZIANO";
+
+  return [
+    `RIEPILOGO OGGI — ${name}`,
+    `Passi: ${formatInteger(steps)} / ${formatInteger(stepsTarget)}`,
+    `Sport: ${sports.length > 0 ? sports.join(", ") : "nessuno"}`,
+    `Allenamenti oggi: ${workouts}`,
+    `Streak: ${streak} giorni`,
+    `Settimana: ${weekWorkouts} allenamenti`
+  ].join("\n");
 }
 
 async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<string> {
@@ -537,6 +593,10 @@ function parseFastHeuristicMessage(message: string): TelegramAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
 
+  if (/^(riepilogo|resoconto|summary)(?:\s+(oggi|today))?$/.test(lower)) {
+    return { kind: "summary", action: "today" };
+  }
+
   const challengeAction = parseChallengeHeuristically(normalized);
   if (challengeAction) return challengeAction;
 
@@ -659,6 +719,11 @@ function detectListKey(message: string): ListKey {
 }
 
 function parseMessageHeuristically(message: string): TelegramAction {
+  const normalizedSummary = message.trim().replace(/\s+/g, " ").toLowerCase();
+  if (/^(riepilogo|resoconto|summary)(?:\s+(oggi|today))?$/.test(normalizedSummary)) {
+    return { kind: "summary", action: "today" };
+  }
+
   const challengeAction = parseChallengeHeuristically(message);
   if (challengeAction) return challengeAction;
 
@@ -1073,6 +1138,10 @@ function isMealPlanAction(action: TelegramAction): action is MealPlanAction {
   return (action as MealPlanAction).kind === "meal_plan";
 }
 
+function isSummaryAction(action: TelegramAction): action is SummaryAction {
+  return (action as SummaryAction).kind === "summary";
+}
+
 function sportFromMessage(message: string): string {
   const lower = message.toLowerCase();
   if (/\b(palestra|gym)\b/.test(lower)) return "palestra";
@@ -1103,6 +1172,47 @@ function parseStoredSports(value: unknown): string[] {
     .map((sport) => sport.trim())
     .filter(Boolean)
     .map(normalizeSport))];
+}
+
+function consecutiveWorkoutDays(today: string, rows: Array<{ date: string; workouts: number }>): number {
+  const completedDates = new Set(
+    rows.filter((row) => Number(row.workouts) > 0).map((row) => row.date)
+  );
+  let cursor = today;
+  if (!completedDates.has(cursor)) cursor = addLocalDays(cursor, -1);
+  let streak = 0;
+  while (streak < 75 && completedDates.has(cursor)) {
+    streak += 1;
+    cursor = addLocalDays(cursor, -1);
+  }
+  return streak;
+}
+
+function weeklyWorkoutCount(today: string, rows: Array<{ date: string; workouts: number }>): number {
+  const todayIndex = localDateIndex(today);
+  const weekday = new Date(todayIndex * 86400000).getUTCDay();
+  const weekStartIndex = todayIndex - (weekday === 0 ? 6 : weekday - 1);
+  return rows
+    .filter((row) => {
+      const rowIndex = localDateIndex(row.date);
+      return rowIndex >= weekStartIndex && rowIndex <= todayIndex;
+    })
+    .reduce((total, row) => total + Math.max(0, Number(row.workouts) || 0), 0);
+}
+
+function addLocalDays(date: string, offset: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day + offset));
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
+}
+
+function localDateIndex(date: string): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 }).format(Math.max(0, Math.round(value)));
 }
 
 function formatNumber(value: number): string {

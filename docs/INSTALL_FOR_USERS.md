@@ -230,6 +230,15 @@ Correcting steps replaces today's value. Undoing a workout decreases today's
 count and removes the last listed sport. Removing a named sport only changes
 the count when that sport is present in today's activities.
 
+Request a personal daily summary:
+
+```text
+riepilogo oggi
+```
+
+The reply includes today's steps and sports, today's workout count, the current
+consecutive-day streak, and workouts completed since Monday.
+
 ### Today's Meal Plan
 
 Meal plan commands match saved recipe titles by partial title. Use these after
