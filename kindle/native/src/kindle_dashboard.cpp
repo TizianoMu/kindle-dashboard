@@ -43,7 +43,16 @@ const int kMaxItems = 16;
 const int kMaxRecipes = 12;
 const int kBitmapFallbackWidth = 760;
 const int kBitmapFallbackHeight = 1024;
-const int kKindleStatusBarHeight = 66;
+// The Kindle framework paints its own status bar in the top band. We draw over
+// it: leaving it visible left an uncovered strip above the header, so the shell
+// starts at the very top of the screen and the framebuffer is written in full.
+const int kShellTopMargin = 0;
+const int kHeaderHeight = 132;
+// Shared by the day-switch arrows and the exit button so the header buttons sit
+// on one row.
+const int kHeaderButtonTop = 28;
+const int kHeaderButtonWidth = 64;
+const int kHeaderButtonHeight = 52;
 const int kWatchdogStallSeconds = 60;
 
 volatile sig_atomic_t g_running = 1;
@@ -1469,6 +1478,14 @@ void drawChallengeTile(Canvas* canvas, int x, int y, int size) {
   }
 }
 
+void drawCloseGlyph(Canvas* canvas, const Rect& rect) {
+  const int cx = rect.x + rect.w / 2;
+  const int cy = rect.y + rect.h / 2;
+  const int half = 14;
+  line(canvas, cx - half, cy - half, cx + half, cy + half, 5, 0);
+  line(canvas, cx + half, cy - half, cx - half, cy + half, 5, 0);
+}
+
 void drawChevron(Canvas* canvas, const Rect& rect, int direction) {
   const int cx = rect.x + rect.w / 2;
   const int cy = rect.y + rect.h / 2;
@@ -1485,19 +1502,23 @@ void drawChevron(Canvas* canvas, const Rect& rect, int direction) {
 
 int drawDaySwitchArrows(Canvas* canvas, int shell_x, int shell_y, int shell_w) {
   (void)shell_w;
-  const int button_w = 64;
+  const int button_w = kHeaderButtonWidth;
   const int today_w = 118;
-  const int button_h = 52;
+  const int button_h = kHeaderButtonHeight;
   const int gap = 12;
-  Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
-  Rect next_rect = {exit_rect.x - 104 - button_w, shell_y + 28, button_w, button_h};
-  Rect today_rect = {next_rect.x - gap - today_w, shell_y + 28, today_w, button_h};
-  Rect prev_rect = {today_rect.x - gap - button_w, shell_y + 28, button_w, button_h};
-  if (prev_rect.x < shell_x + 320) {
-    prev_rect.x = shell_x + 320;
-    today_rect.x = prev_rect.x + button_w + gap;
-    next_rect.x = today_rect.x + today_w + gap;
-  }
+  // Wide enough that the arrows stay outside the padded exit hit zone in
+  // applyTouchWithDebounce, which would otherwise swallow "next day" taps.
+  const int exit_gap = 44;
+  const int group_w = button_w * 2 + today_w + gap * 2;
+  const Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
+  // Anchor the group to the left of the exit button. The previous version
+  // clamped the group's left edge to a minimum instead, which on a 760px screen
+  // pushed the "next day" button underneath the exit button.
+  int group_x = exit_rect.x - exit_gap - group_w;
+  if (group_x < shell_x + 20) group_x = shell_x + 20;
+  const Rect prev_rect = {group_x, shell_y + kHeaderButtonTop, button_w, button_h};
+  const Rect today_rect = {group_x + button_w + gap, shell_y + kHeaderButtonTop, today_w, button_h};
+  const Rect next_rect = {group_x + button_w + gap + today_w + gap, shell_y + kHeaderButtonTop, button_w, button_h};
 
   strokeRect(canvas, prev_rect.x, prev_rect.y, prev_rect.w, prev_rect.h, 2, 0);
   drawChevron(canvas, prev_rect, -1);
@@ -1515,15 +1536,14 @@ int drawDaySwitchArrows(Canvas* canvas, int shell_x, int shell_y, int shell_w) {
 }
 
 void drawTopHeader(Canvas* canvas, const Dashboard* dashboard, const char* status, int shell_x, int shell_y, int shell_w) {
-  const int header_h = 132;
-  doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, header_h, 0);
+  doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, kHeaderHeight, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
   drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
 
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
-  Rect exit_hit_rect = {exit_rect.x - 20, kKindleStatusBarHeight, exit_rect.w + 40, exit_rect.y - kKindleStatusBarHeight + exit_rect.h + 20};
+  Rect exit_hit_rect = {exit_rect.x - 20, kShellTopMargin, exit_rect.w + 40, exit_rect.y - kShellTopMargin + exit_rect.h + 20};
   strokeRect(canvas, exit_rect.x, exit_rect.y, exit_rect.w, exit_rect.h, 2, 0);
-  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "ESCI", 3, 0);
+  drawCloseGlyph(canvas, exit_rect);
   addTouchRegion(exit_hit_rect, kTouchExit, -1, -1, "", 0);
   addTouchRegion(exit_rect, kTouchExit, -1, -1, "", 0);
 
@@ -1559,7 +1579,7 @@ void drawMealPlannerDashboard(Canvas* canvas, const Dashboard* dashboard, const 
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
@@ -1623,7 +1643,7 @@ void drawRecipesDashboard(Canvas* canvas, const Dashboard* dashboard, const char
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
@@ -1661,7 +1681,7 @@ void drawRecipeRecordDashboard(Canvas* canvas, const Dashboard* dashboard, const
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
@@ -1736,7 +1756,7 @@ void drawRecipeDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
@@ -1810,7 +1830,7 @@ void drawFullListDashboard(Canvas* canvas, const Dashboard* dashboard, int list_
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
 
@@ -1852,7 +1872,7 @@ void drawChallengeDashboard(Canvas* canvas, const Dashboard* dashboard, const ch
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
@@ -1909,14 +1929,14 @@ void drawCurrentDashboard(Canvas* canvas, const Dashboard* dashboard, const char
   drawBitmapDashboard(canvas, dashboard, status);
 }
 
+// Right-aligned, on the same row and the same size as the day-switch buttons.
+// It used to be a 172px-wide "ESCI" box, which the day-switch arrows ran into.
 Rect exitButtonRectForScreen(int width, int) {
-  const int shell_w = width;
-  const int shell_x = 0;
   Rect rect;
-  rect.w = 172;
-  rect.h = 96;
-  rect.x = shell_x + shell_w - rect.w - 28;
-  rect.y = kKindleStatusBarHeight + 20;
+  rect.w = kHeaderButtonWidth;
+  rect.h = kHeaderButtonHeight;
+  rect.x = width - rect.w - 26;
+  rect.y = kShellTopMargin + kHeaderButtonTop;
   return rect;
 }
 
@@ -1967,18 +1987,17 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   g_last_screen_height = canvas->height;
   const int shell_w = canvas->width;
   const int shell_x = 0;
-  const int shell_y = kKindleStatusBarHeight;
+  const int shell_y = kShellTopMargin;
   const int shell_h = canvas->height - shell_y;
   strokeRect(canvas, shell_x, shell_y, shell_w, shell_h, 3, 0);
 
-  const int header_h = 132;
-  doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, header_h, 0);
+  doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, kHeaderHeight, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
   drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
-  Rect exit_hit_rect = {exit_rect.x - 20, kKindleStatusBarHeight, exit_rect.w + 40, exit_rect.y - kKindleStatusBarHeight + exit_rect.h + 20};
+  Rect exit_hit_rect = {exit_rect.x - 20, kShellTopMargin, exit_rect.w + 40, exit_rect.y - kShellTopMargin + exit_rect.h + 20};
   strokeRect(canvas, exit_rect.x, exit_rect.y, exit_rect.w, exit_rect.h, 2, 0);
-  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "ESCI", 3, 0);
+  drawCloseGlyph(canvas, exit_rect);
   addTouchRegion(exit_hit_rect, kTouchExit, -1, -1, "", 0);
   addTouchRegion(exit_rect, kTouchExit, -1, -1, "", 0);
   line(canvas, shell_x + 20, shell_y + 88, exit_rect.x - 8, shell_y + 88, 2, 0);
@@ -1987,7 +2006,7 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   drawTextClipped(canvas, shell_x + 28, shell_y + 102, exit_rect.x - shell_x - 44, updated, 2, 0);
 
   const int gap = 8;
-  const int stat_y = shell_y + 10 + header_h + gap;
+  const int stat_y = shell_y + 10 + kHeaderHeight + gap;
   const int stat_h = shell_h < 900 ? 220 : 252;
   const int stat_w = (shell_w - 20 - gap * 2) / 3;
   drawImageCard(canvas, shell_x + 10, stat_y, stat_w, stat_h, kProfileCardPath, kProfileCardLocalPath);
@@ -2070,9 +2089,15 @@ int applyTouchWithDebounce(TouchInput* input) {
   const int x = input->x;
   const int y = input->y;
 
-  if (x >= w - 280 && y >= kKindleStatusBarHeight && y <= kKindleStatusBarHeight + 160) {
+  // Exit shortcut, checked before the region list so a tap near the corner
+  // always quits. It is padded around the button but must stay clear of the
+  // day-switch arrows, which sit in the same header band.
+  const Rect exit_rect = exitButtonRectForScreen(w, h);
+  const int exit_pad = 20;
+  if (x >= exit_rect.x - exit_pad && x < exit_rect.x + exit_rect.w + exit_pad &&
+      y >= kShellTopMargin && y < exit_rect.y + exit_rect.h + exit_pad) {
     g_pending_action = kTouchExit;
-    setPendingTouchRect(exitButtonRectForScreen(w, h));
+    setPendingTouchRect(exit_rect);
   } else if (!applyTouchAt(x, y) &&
              !applyTouchAt(w - 1 - x, y) &&
              !applyTouchAt(x, h - 1 - y) &&
@@ -2335,8 +2360,8 @@ void invertFramebufferArea(unsigned char* fb, const fb_var_screeninfo* vinfo, co
 
 void flashTouchRectOnFramebuffer(Rect rect) {
   if (rect.w <= 0 || rect.h <= 0) return;
-  if (rect.y < kKindleStatusBarHeight) {
-    const int shift = kKindleStatusBarHeight - rect.y;
+  if (rect.y < kShellTopMargin) {
+    const int shift = kShellTopMargin - rect.y;
     rect.y += shift;
     rect.h -= shift;
   }
@@ -2365,7 +2390,7 @@ void flashTouchRectOnFramebuffer(Rect rect) {
   }
 
   const int left = rect.x < 0 ? 0 : rect.x;
-  const int top = rect.y < kKindleStatusBarHeight ? kKindleStatusBarHeight : rect.y;
+  const int top = rect.y < kShellTopMargin ? kShellTopMargin : rect.y;
   const int right = rect.x + rect.w > static_cast<int>(vinfo.xres) ? static_cast<int>(vinfo.xres) : rect.x + rect.w;
   const int bottom = rect.y + rect.h > static_cast<int>(vinfo.yres) ? static_cast<int>(vinfo.yres) : rect.y + rect.h;
   invertFramebufferArea(fb, &vinfo, &finfo, left, top, right, bottom, 0);
@@ -2423,7 +2448,7 @@ int renderToFramebuffer(const Dashboard* dashboard, const char* status, const ch
     writePgm(save_pgm, &canvas);
     fprintf(stderr, "render=save-pgm %s width=%d height=%d\n", save_pgm, canvas.width, canvas.height);
   }
-  for (int y = kKindleStatusBarHeight; y < canvas.height; y++) {
+  for (int y = kShellTopMargin; y < canvas.height; y++) {
     for (int x = 0; x < canvas.width; x++) putFramebufferPixel(fb, &vinfo, &finfo, x, y, canvas.pixels[y * canvas.width + x]);
   }
   free(canvas.pixels);
