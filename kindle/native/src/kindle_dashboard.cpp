@@ -44,10 +44,18 @@ const int kMaxRecipes = 12;
 const int kBitmapFallbackWidth = 760;
 const int kBitmapFallbackHeight = 1024;
 const int kKindleStatusBarHeight = 66;
+const int kWatchdogStallSeconds = 60;
 
 volatile sig_atomic_t g_running = 1;
 volatile sig_atomic_t g_event_refresh = 0;
 volatile sig_atomic_t g_manual_fetch_refresh = 0;
+// Bumped from the main thread whenever it makes progress; the watchdog thread
+// force-releases the input grab and exits if it stops advancing (see below).
+volatile unsigned int g_watchdog_tick = 0;
+// Input fds currently grabbed via EVIOCGRAB, recorded so the watchdog can
+// release them from another thread without touching the whole TouchInput.
+int g_grabbed_fds[16];
+int g_grabbed_fd_count = 0;
 int g_last_screen_width = kBitmapFallbackWidth;
 int g_last_screen_height = kBitmapFallbackHeight;
 int g_active_list = -1;
@@ -290,6 +298,12 @@ long long monotonicMs() {
   timeval tv;
   gettimeofday(&tv, NULL);
   return static_cast<long long>(tv.tv_sec) * 1000LL + static_cast<long long>(tv.tv_usec / 1000);
+}
+
+// Signal to the watchdog that the main thread is still making progress. Called
+// at every point where the main loop could otherwise block for a long time.
+void kickWatchdog() {
+  g_watchdog_tick++;
 }
 
 void copyText(char* dest, size_t size, const char* source) {
@@ -2036,17 +2050,20 @@ struct TouchInput {
   int has_x;
   int has_y;
   int was_down;
-  long last_action_ms;
+  long long last_action_ms;
 };
 
-long nowMs() {
+long long nowMs() {
   timeval tv;
   gettimeofday(&tv, NULL);
-  return tv.tv_sec * 1000L + tv.tv_usec / 1000L;
+  // Must be 64-bit: on 32-bit targets (the Kindle is ARM 32-bit) tv_sec * 1000
+  // overflows a 32-bit long and goes negative, which broke the touch debounce
+  // (every tap looked "too soon" and was dropped, freezing all input).
+  return static_cast<long long>(tv.tv_sec) * 1000LL + tv.tv_usec / 1000;
 }
 
 int applyTouchWithDebounce(TouchInput* input) {
-  const long now = nowMs();
+  const long long now = nowMs();
   if (now - input->last_action_ms < 700) return 0;
   const int w = g_last_screen_width;
   const int h = g_last_screen_height;
@@ -2091,30 +2108,58 @@ int scaleAbsValue(int value, int minimum, int maximum, int screen_size) {
   return static_cast<int>(scaled);
 }
 
-void initTouchInput(TouchInput* input) {
+// grab=1 takes exclusive ownership of the touchscreen for interactive use;
+// grab=0 only probes/logs the devices (used by --once/--render, which just
+// render and exit and must never lock the screen).
+void initTouchInput(TouchInput* input, int grab) {
   memset(input, 0, sizeof(*input));
   input->x = -1;
   input->y = -1;
   for (int i = 0; i < 16 && input->count < 16; i++) {
     char path[48];
     snprintf(path, sizeof(path), "/dev/input/event%d", i);
-    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    // O_CLOEXEC so forked helpers (curl, fbink) never inherit the grabbed input
+    // fd; otherwise a lingering child could keep the touchscreen grabbed after
+    // the app exits, locking the whole Kindle until a reboot.
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) continue;
 
     TouchInput::Device* device = &input->devices[input->count];
     memset(device, 0, sizeof(*device));
     device->fd = fd;
-    device->has_x_range = readAbsRange(fd, ABS_X, &device->min_x, &device->max_x) ||
-                          readAbsRange(fd, ABS_MT_POSITION_X, &device->min_x, &device->max_x);
-    device->has_y_range = readAbsRange(fd, ABS_Y, &device->min_y, &device->max_y) ||
-                          readAbsRange(fd, ABS_MT_POSITION_Y, &device->min_y, &device->max_y);
+    int abs_x_dummy = 0;
+    int abs_y_dummy = 0;
+    const int has_abs_x = readAbsRange(fd, ABS_X, &device->min_x, &device->max_x);
+    const int has_mt_x = readAbsRange(fd, ABS_MT_POSITION_X, has_abs_x ? &abs_x_dummy : &device->min_x, has_abs_x ? &abs_x_dummy : &device->max_x);
+    const int has_abs_y = readAbsRange(fd, ABS_Y, &device->min_y, &device->max_y);
+    const int has_mt_y = readAbsRange(fd, ABS_MT_POSITION_Y, has_abs_y ? &abs_y_dummy : &device->min_y, has_abs_y ? &abs_y_dummy : &device->max_y);
+    device->has_x_range = has_abs_x || has_mt_x;
+    device->has_y_range = has_abs_y || has_mt_y;
+
+    // Diagnostic: report every input device we can open, its name and which
+    // absolute axes it exposes, so we can tell which node is the touchscreen.
+    char dev_name[128] = "";
+    ioctl(fd, EVIOCGNAME(sizeof(dev_name)), dev_name);
+    fprintf(stderr, "input=probe path=%s name=\"%s\" abs_x=%d mt_x=%d abs_y=%d mt_y=%d\n",
+            path, dev_name, has_abs_x, has_mt_x, has_abs_y, has_mt_y);
 
     if (!device->has_x_range || !device->has_y_range) {
       close(fd);
       continue;
     }
 
-    if (ioctl(fd, EVIOCGRAB, 1) == 0) device->grabbed = 1;
+    if (!grab) {
+      // Probe-only mode: we have logged the device, do not hold or grab it.
+      close(fd);
+      continue;
+    }
+
+    if (ioctl(fd, EVIOCGRAB, 1) == 0) {
+      device->grabbed = 1;
+      if (g_grabbed_fd_count < static_cast<int>(sizeof(g_grabbed_fds) / sizeof(g_grabbed_fds[0]))) {
+        g_grabbed_fds[g_grabbed_fd_count++] = fd;
+      }
+    }
     fprintf(stderr, "input=device path=%s grabbed=%d xrange=%d..%d yrange=%d..%d\n",
             path, device->grabbed, device->min_x, device->max_x, device->min_y, device->max_y);
     input->count++;
@@ -2139,9 +2184,25 @@ int pollExitTouch(TouchInput* input) {
       const ssize_t bytes = read(device->fd, &event, sizeof(event));
       if (bytes != sizeof(event)) {
         if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-          // Keep the fd open; intermittent event read errors are not fatal to rendering.
+          // Diagnostic: a short/failed read (other than "no data") would explain
+          // why no touch events are ever processed.
+          static int short_read_logs = 0;
+          if (short_read_logs < 20) {
+            fprintf(stderr, "input=readfail dev=%d bytes=%zd errno=%d want=%zu\n",
+                    i, bytes, errno, sizeof(event));
+            short_read_logs++;
+          }
         }
         break;
+      }
+
+      // Diagnostic: dump raw events so we can see exactly what the touchscreen
+      // emits (device node, event type/code/value). Capped to avoid log spam.
+      static int raw_logs = 0;
+      if (raw_logs < 300) {
+        fprintf(stderr, "input=raw dev=%d type=%d code=%d value=%d\n",
+                i, static_cast<int>(event.type), static_cast<int>(event.code), event.value);
+        raw_logs++;
       }
 
       if (event.type == EV_ABS) {
@@ -2180,7 +2241,7 @@ struct TouchInput {
   int unused;
 };
 
-void initTouchInput(TouchInput*) {}
+void initTouchInput(TouchInput*, int) {}
 void closeTouchInput(TouchInput*) {}
 [[maybe_unused]] int pollExitTouch(TouchInput*) { return 0; }
 #endif
@@ -2876,8 +2937,45 @@ void startTouchWatcher(TouchInput* touch) {
   pthread_detach(thread);
   fprintf(stderr, "input=thread_started\n");
 }
+
+// Safety net: if the main thread stops advancing g_watchdog_tick for
+// kWatchdogStallSeconds (e.g. it hangs inside a fetch or a framebuffer/eink
+// call while the touchscreen is grabbed), release the grab and kill the
+// process so the Kindle becomes usable again without a reboot. This thread
+// never forks, so it cannot trigger the multithreaded-fork hazard.
+void* watchdogMain(void*) {
+  unsigned int last_tick = g_watchdog_tick;
+  int stalled = 0;
+  while (g_running) {
+    usleep(1000000);
+    const unsigned int tick = g_watchdog_tick;
+    if (tick != last_tick) {
+      last_tick = tick;
+      stalled = 0;
+      continue;
+    }
+    if (++stalled >= kWatchdogStallSeconds) {
+      fprintf(stderr, "watchdog=timeout stalled_s=%d releasing_input\n", stalled);
+      for (int i = 0; i < g_grabbed_fd_count; i++) ioctl(g_grabbed_fds[i], EVIOCGRAB, 0);
+      _exit(2);
+    }
+  }
+  return NULL;
+}
+
+void startWatchdog() {
+  kickWatchdog();
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, watchdogMain, NULL) != 0) {
+    fprintf(stderr, "watchdog=thread_failed\n");
+    return;
+  }
+  pthread_detach(thread);
+  fprintf(stderr, "watchdog=thread_started stall_limit_s=%d\n", kWatchdogStallSeconds);
+}
 #else
 void startTouchWatcher(TouchInput*) {}
+void startWatchdog() {}
 #endif
 
 struct EventWatcherArgs {
@@ -3111,6 +3209,7 @@ int shouldRepaintCachedTick(int tick) {
 
 int waitForWakeEvent(const Options* options, int seconds, int allow_repaint) {
   for (int elapsed = 1; elapsed <= seconds && g_running; elapsed++) {
+    kickWatchdog();
     if (g_pending_action != kTouchNone) {
       const int touch_result = handlePendingTouch(options);
       if (!g_running) return 0;
@@ -3246,13 +3345,17 @@ int main(int argc, char** argv) {
   applyInitialView(options.view);
 
   TouchInput touch;
-  initTouchInput(&touch);
-  startTouchWatcher(&touch);
-  if (!options.once && !options.render_only[0]) {
+  // --once only renders and exits, so it probes the input devices for diagnostics
+  // but never grabs them; grabbing (and the touch watcher) is for interactive use.
+  initTouchInput(&touch, !options.once);
+  if (!options.once) {
+    startTouchWatcher(&touch);
+    startWatchdog();
     startEventWatcher(options.events_url, options.read_token, options.sleep_start_minute, options.sleep_end_minute);
   }
 
   while (g_running) {
+    kickWatchdog();
     int pending_result = 0;
     if (g_pending_action != kTouchNone) pending_result = handlePendingTouch(&options);
     if (!g_running) break;
@@ -3300,6 +3403,7 @@ int main(int argc, char** argv) {
     char dashboard_url[320];
     buildDashboardUrl(options.url, dashboard_url, sizeof(dashboard_url));
     const int fetched = fetchToCache(dashboard_url, options.read_token, options.cache);
+    kickWatchdog();
     if (!g_running) break;
     if (!renderCachedPayload(&options, fetched ? "live" : "cached/offline")) {
       char lines[kMaxRows][96];
