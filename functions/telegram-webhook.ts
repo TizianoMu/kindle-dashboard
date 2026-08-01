@@ -500,7 +500,7 @@ function parseFastHeuristicMessage(message: string): TelegramAction | null {
   const targetAction = parseTargetHeuristically(normalized);
   if (targetAction) return targetAction;
 
-  const hasPlannerVerb = /\b(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset)\b/.test(lower);
+  const hasPlannerVerb =/\b(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|compra|segna|completa|spuntare|spunta|riapri|rimuovi|elimina|cancella|svuota)\b/i.test(lower);
   if (hasPlannerVerb && hasExplicitList(normalized)) {
     return parseMessageHeuristically(normalized);
   }
@@ -534,10 +534,54 @@ function logTiming(label: string, timing: Record<string, number | string>): void
 }
 
 const LIST_ALIASES: Record<ListKey, string[]> = {
-  grocery: ["grocery", "groceries", "shopping", "market"],
-  workout: ["workout", "exercise", "training", "gym"],
-  meal: ["meal", "meals", "menu", "food"],
-  todo: ["todo", "to-do", "task", "tasks", "errand", "errands"]
+  grocery: [
+    "grocery",
+    "groceries",
+    "shopping",
+    "market",
+    "spesa",
+    "lista della spesa",
+    "supermercato",
+    "comprare",
+    "compra"
+  ],
+  workout: [
+    "workout",
+    "exercise",
+    "training",
+    "gym",
+    "allenamento",
+    "palestra"
+  ],
+  meal: [
+    "meal",
+    "meals",
+    "menu",
+    "food",
+    "pasto",
+    "pasti",
+    "menu",
+    "cibo",
+    "pranzo",
+    "cena",
+    "colazione"
+    
+  ],
+  todo: [
+    "todo",
+    "to-do",
+    "task",
+    "tasks",
+    "errand",
+    "errands",
+    "da fare",
+    "promemoria",
+    "attività",
+    "compito",
+    "compiti",
+    "cose da fare",
+    "chores"
+  ]
 };
 
 const LIST_KEYS: ListKey[] = ["grocery", "workout", "meal", "todo"];
