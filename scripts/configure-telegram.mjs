@@ -6,7 +6,12 @@ for (let index = 2; index < process.argv.length; index += 2) {
 }
 
 const botToken = args.get("--bot-token") || process.env.TELEGRAM_BOT_TOKEN;
-const chatId = args.get("--chat-id") || process.env.TELEGRAM_ALLOWED_CHAT_ID;
+// One chat ID or a comma-separated list; the webhook accepts any of them.
+const chatIds = (args.get("--chat-id") || process.env.TELEGRAM_ALLOWED_CHAT_ID || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter((id) => id.length > 0);
+const chatId = chatIds.join(",");
 const baseUrl = args.get("--base-url") || process.env.INSFORGE_BASE_URL || "";
 const webhookUrl =
   args.get("--webhook-url") ||
@@ -14,7 +19,15 @@ const webhookUrl =
   (baseUrl ? `${baseUrl.replace(/\/+$/, "")}/functions/telegram-webhook` : "");
 
 if (!botToken || !chatId || !webhookUrl) {
-  console.error("Usage: npm run telegram:configure -- --bot-token <token> --chat-id <chat-id> --webhook-url <url>");
+  console.error("Usage: npm run telegram:configure -- --bot-token <token> --chat-id <id>[,<id>...] --webhook-url <url>");
+  process.exit(1);
+}
+
+// A malformed ID never matches, and the webhook answers 200 with
+// reason="chat_not_allowed" — the bot just goes quiet. Catch it here instead.
+const invalidIds = chatIds.filter((id) => !/^-?\d+$/.test(id));
+if (invalidIds.length > 0) {
+  console.error(`Invalid chat ID(s): ${invalidIds.join(", ")} (expected integers, negative for groups)`);
   process.exit(1);
 }
 
@@ -30,7 +43,7 @@ if (!response.ok) {
 }
 
 console.log(`Telegram webhook registered: ${webhookUrl}`);
-console.log(`Allowed chat ID set: ${chatId}`);
+console.log(`Allowed chat ID(s) set: ${chatIds.join(", ")}`);
 
 function setSecret(key, value) {
   try {

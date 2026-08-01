@@ -87,8 +87,7 @@ export default async function(req: Request): Promise<Response> {
 
   const update = (await req.json()) as TelegramUpdate;
   const chatId = String(update.message?.chat?.id ?? "");
-  const allowedChatId = requiredEnv("TELEGRAM_ALLOWED_CHAT_ID");
-  if (chatId !== allowedChatId) {
+  if (!allowedChatIds().includes(chatId)) {
     return jsonResponse({ ok: true, ignored: true, reason: "chat_not_allowed" });
   }
 
@@ -525,6 +524,18 @@ function requiredEnv(key: string): string {
   const value = Deno.env.get(key);
   if (!value) throw new Error(`Missing ${key}`);
   return value;
+}
+
+// TELEGRAM_ALLOWED_CHAT_ID holds one chat ID or a comma-separated list, so the
+// same bot can serve several chats (phone, family group). All of them share the
+// same planner rows: the schema has no per-chat ownership.
+function allowedChatIds(): string[] {
+  const ids = requiredEnv("TELEGRAM_ALLOWED_CHAT_ID")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+  if (ids.length === 0) throw new Error("TELEGRAM_ALLOWED_CHAT_ID has no usable chat ID");
+  return ids;
 }
 
 function timeMs(): number {

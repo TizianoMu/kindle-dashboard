@@ -86,6 +86,17 @@ npm run telegram:configure -- \
   --webhook-url https://your-project.insforge.app/functions/telegram-webhook
 ```
 
+To let more than one chat drive the planner — your phone plus a family group,
+say — pass every ID separated by commas (group IDs are negative):
+
+```sh
+  --chat-id 123456789,-1009876543210 \
+```
+
+Messages from any listed chat are accepted, and replies go back to whichever
+chat sent the command. All of them read and write the **same** lists, meal plan,
+and challenge log: there is no per-chat separation.
+
 Try a Telegram command:
 
 ```text

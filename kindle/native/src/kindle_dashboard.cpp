@@ -1538,7 +1538,7 @@ int drawDaySwitchArrows(Canvas* canvas, int shell_x, int shell_y, int shell_w) {
 void drawTopHeader(Canvas* canvas, const Dashboard* dashboard, const char* status, int shell_x, int shell_y, int shell_w) {
   doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, kHeaderHeight, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
-  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
+  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA", 4, 0);
 
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
   Rect exit_hit_rect = {exit_rect.x - 20, kShellTopMargin, exit_rect.w + 40, exit_rect.y - kShellTopMargin + exit_rect.h + 20};
@@ -1993,7 +1993,7 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
 
   doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, kHeaderHeight, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
-  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
+  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA", 4, 0);
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
   Rect exit_hit_rect = {exit_rect.x - 20, kShellTopMargin, exit_rect.w + 40, exit_rect.y - kShellTopMargin + exit_rect.h + 20};
   strokeRect(canvas, exit_rect.x, exit_rect.y, exit_rect.w, exit_rect.h, 2, 0);

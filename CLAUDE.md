@@ -117,7 +117,10 @@ recovers quickly when Wi-Fi returns. Task toggles patch the cache optimistically
 OpenAI (only if `OPENAI_API_KEY` is set), then a deterministic fallback — every
 path validates to a strict action object before any DB write. List names resolve
 through `LIST_ALIASES`. The webhook gate is intentionally minimal: a secret
-header check plus an allowed chat-ID check.
+header check plus an allowed chat-ID check (`allowedChatIds()` parses
+`TELEGRAM_ALLOWED_CHAT_ID` as one ID or a comma-separated list; every allowed
+chat shares the same planner rows, since nothing in the schema is scoped per
+chat).
 
 ## Backend / config specifics
 
