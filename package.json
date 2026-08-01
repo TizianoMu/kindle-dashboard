@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "native:check": "make -C kindle/native check",
+    "native:preview": "node scripts/preview-dashboard.mjs",
     "native:install": "node scripts/install-kindle-native.mjs",
     "native:proof": "node scripts/check-kindle-proof.mjs",
     "check": "npm run native:check",

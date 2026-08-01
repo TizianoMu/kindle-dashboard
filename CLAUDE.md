@@ -21,6 +21,7 @@ Node scripts (`package.json`) orchestrate builds and setup; the actual C++ build
 
 ```bash
 npm run native:check      # build the host binary and render fixtures/dashboard-data.json (the main sanity check)
+npm run native:preview    # render every view to PNG and open them in a browser (scripts/preview-dashboard.mjs)
 npm run native:install    # deploy the ARM binary to a connected Kindle (scripts/install-kindle-native.mjs)
 npm run native:proof      # scripts/check-kindle-proof.mjs
 npm run kit:backend       # bootstrap a fresh InsForge project (scripts/bootstrap-insforge-kit.mjs)
@@ -52,6 +53,23 @@ The binary detects hardware; off-device it falls back to file output. Useful fla
 ./build/kindle-dashboard-local --render fixtures/dashboard-data.json --save-pgm /tmp/out.pgm
 ./build/kindle-dashboard-local --url URL --cache /tmp/c.json --once --save-pgm /tmp/out.pgm   # exercise the fetch/render loop once
 ```
+
+To actually *look* at a render, `npm run native:preview` wraps that loop: it
+renders every view to `/tmp/kdash-preview/` and opens a contact sheet in the
+browser. Optional args select a single view (`-- challenge`) or skip the
+browser (`-- --no-open`); `PREVIEW_FIXTURE` / `PREVIEW_DIR` override the input
+payload and output directory. The PGM→PNG step is a small hand-rolled encoder
+on `node:zlib` (`scripts/preview-dashboard.mjs`) so no ImageMagick or Pillow is
+needed.
+
+Two things bite when driving the binary by hand instead:
+
+- **Run it from the repo root.** The cover/profile asset paths are absolute
+  (`/mnt/us/extensions/...`) with a fallback relative to the repo root, so from
+  `kindle/native/` the images silently fail to load (`timing=image-load ok=0`).
+- **`--view` is the only way to reach the secondary screens off-device**, since
+  touch needs real hardware. Valid values are `challenge`, `grocery`, `chores`,
+  `recipe`, `meal-recipe` (see `applyInitialView`); omit it for the home screen.
 
 Key flags (see `parseOptions` / `main` in the renderer): `--url`, `--events-url`,
 `--toggle-url`, `--read-token`, `--toggle-token`, `--cache`, `--interval`,

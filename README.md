@@ -41,8 +41,8 @@ If you are using a coding assistant for setup, use
 - `ios/HealthSyncCompanion/`: Optional iOS app that reads Apple Health daily
   aggregates and posts them to the `health-sync` function.
 - `scripts/`: Setup and maintenance helpers for InsForge bootstrapping,
-  Telegram webhook configuration, Kindle native install, and Kindle proof
-  checks.
+  Telegram webhook configuration, Kindle native install, Kindle proof checks,
+  and the desktop render preview (`npm run native:preview`).
 - `docs/`: Human and coding-assistant setup guides.
 
 ## Technical Breakdown

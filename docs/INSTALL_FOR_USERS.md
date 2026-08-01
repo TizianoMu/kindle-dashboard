@@ -246,6 +246,18 @@ Run the local syntax/render check before packaging:
 npm run native:check
 ```
 
+To see what the dashboard will actually look like before installing anything on
+the Kindle, render it on your computer:
+
+```sh
+npm run native:preview
+```
+
+That writes a PNG per screen to `/tmp/kdash-preview/` and opens them in your
+browser. It uses the bundled sample payload by default; point it at a real
+payload fetched from your own backend with
+`PREVIEW_FIXTURE=/path/to/payload.json npm run native:preview`.
+
 If you have Zig installed, build a soft-float ARM KUAL package:
 
 ```sh

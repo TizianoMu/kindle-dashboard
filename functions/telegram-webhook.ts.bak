@@ -65,7 +65,7 @@ type TelegramUpdate = {
   };
 };
 
-export default async function(req: Request): Promise<Response> {
+export default async function (req: Request): Promise<Response> {
   const started = timeMs();
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
@@ -571,7 +571,7 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
     "pranzo",
     "cena",
     "colazione"
-    
+
   ],
   todo: [
     "todo",
@@ -644,9 +644,9 @@ function parseMessageHeuristically(message: string): TelegramAction {
   const items = action === "clear"
     ? []
     : itemText
-        .split(/\s*(?:,|;|\+|\be\b|\bed\b)\s*/i)
-        .map((item) => item.replace(/^(the|il|lo|la|i|gli|le|un|uno|una)\s+/i, "").trim())
-        .filter(Boolean);
+      .split(/\s*(?:,|;|\+|\be\b|\bed\b)\s*/i)
+      .map((item) => item.replace(/^(the|il|lo|la|i|gli|le|un|uno|una)\s+/i, "").trim())
+      .filter(Boolean);
 
   return {
     kind: "planner",
@@ -749,8 +749,8 @@ function validateRecipeAction(input: unknown): RecipeAction | null {
   if (!Number.isFinite(rating) || rating < 0 || rating > 5) return null;
   const ingredients = Array.isArray(candidate.ingredients)
     ? candidate.ingredients
-        .map((ingredient) => normalizeRecipeIngredient(ingredient))
-        .filter((ingredient): ingredient is RecipeIngredientInput => ingredient !== null)
+      .map((ingredient) => normalizeRecipeIngredient(ingredient))
+      .filter((ingredient): ingredient is RecipeIngredientInput => ingredient !== null)
     : [];
   return {
     kind: "recipe",
