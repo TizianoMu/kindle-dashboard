@@ -2506,7 +2506,10 @@ int fetchToCache(const char* url, const char* read_token, const char* cache) {
   }
 
   if (commandExists("curl")) {
-    snprintf(command, sizeof(command), "curl -fsSL --connect-timeout 20 --max-time 55 --max-filesize %ld %s%s%s -o %s %s",
+    // Keep timeouts short: fetchToCache runs on the main thread, so a stalled
+    // request blocks touch handling until it returns. A failed fetch retries
+    // after kOfflineRetrySeconds, so there is no need to wait a long time here.
+    snprintf(command, sizeof(command), "curl -fsSL --connect-timeout 8 --max-time 20 --max-filesize %ld %s%s%s -o %s %s",
              kMaxDashboardPayloadBytes,
              quoted_header[0] ? "-H " : "",
              quoted_header[0] ? quoted_header : "",
@@ -2514,7 +2517,7 @@ int fetchToCache(const char* url, const char* read_token, const char* cache) {
              quoted_tmp,
              quoted_url);
   } else if (commandExists("wget")) {
-    snprintf(command, sizeof(command), "wget -q -T 55 %s%s%s -O %s %s",
+    snprintf(command, sizeof(command), "wget -q -T 20 %s%s%s -O %s %s",
              quoted_header[0] ? "--header=" : "",
              quoted_header[0] ? quoted_header : "",
              quoted_header[0] ? " " : "",
@@ -2543,35 +2546,6 @@ int fetchToCache(const char* url, const char* read_token, const char* cache) {
   free(payload_check);
   fprintf(stderr, "timing=fetch ok=1 ms=%lld\n", monotonicMs() - started);
   return 1;
-}
-
-// Runs fetchToCache on a worker thread so the main loop stays responsive to
-// touches while curl is blocked (e.g. Wi-Fi associated but no connectivity,
-// where a single attempt can stall for tens of seconds). Ownership of the job
-// is shared: whichever side observes the fetch as unfinished last frees it.
-struct FetchJob {
-  char url[320];
-  char read_token[160];
-  char cache[256];
-  pthread_mutex_t lock;
-  int done;
-  int result;
-  int abandoned;
-};
-
-void* fetchJobMain(void* raw) {
-  FetchJob* job = static_cast<FetchJob*>(raw);
-  const int result = fetchToCache(job->url, job->read_token, job->cache);
-  pthread_mutex_lock(&job->lock);
-  job->result = result;
-  job->done = 1;
-  const int abandoned = job->abandoned;
-  pthread_mutex_unlock(&job->lock);
-  if (abandoned) {
-    pthread_mutex_destroy(&job->lock);
-    free(job);
-  }
-  return NULL;
 }
 
 int writeTextFileAtomic(const char* path, const char* data, size_t size) {
@@ -3157,53 +3131,6 @@ int waitForWakeEvent(const Options* options, int seconds, int allow_repaint) {
   return 1;
 }
 
-// Fetches into the cache without blocking the UI: while the worker thread runs
-// curl, the main thread keeps servicing touches so exit and navigation stay
-// responsive. Returns 1 if the fetch succeeded, 0 otherwise.
-int fetchToCacheResponsive(const Options* options, const char* url) {
-  FetchJob* job = static_cast<FetchJob*>(calloc(1, sizeof(FetchJob)));
-  if (!job) return fetchToCache(url, options->read_token, options->cache);
-  copyText(job->url, sizeof(job->url), url);
-  copyText(job->read_token, sizeof(job->read_token), options->read_token);
-  copyText(job->cache, sizeof(job->cache), options->cache);
-  pthread_mutex_init(&job->lock, NULL);
-
-  pthread_t thread;
-  if (pthread_create(&thread, NULL, fetchJobMain, job) != 0) {
-    const int result = fetchToCache(job->url, job->read_token, job->cache);
-    pthread_mutex_destroy(&job->lock);
-    free(job);
-    return result;
-  }
-  pthread_detach(thread);
-
-  while (1) {
-    pthread_mutex_lock(&job->lock);
-    const int done = job->done;
-    const int result = job->result;
-    if (done) {
-      // Worker finished and left ownership to us (it saw abandoned == 0).
-      pthread_mutex_unlock(&job->lock);
-      pthread_mutex_destroy(&job->lock);
-      free(job);
-      return result;
-    }
-    if (!g_running) {
-      // Give up waiting; hand ownership to the detached worker.
-      job->abandoned = 1;
-      pthread_mutex_unlock(&job->lock);
-      return 0;
-    }
-    pthread_mutex_unlock(&job->lock);
-
-    if (g_pending_action != kTouchNone) {
-      const int touch_result = handlePendingTouch(options);
-      if (g_running && touch_result == 1) renderCachedPayload(options, "cached/local");
-    }
-    usleep(200000);
-  }
-}
-
 void handleSignal(int) {
   g_running = 0;
 }
@@ -3372,7 +3299,7 @@ int main(int argc, char** argv) {
     }
     char dashboard_url[320];
     buildDashboardUrl(options.url, dashboard_url, sizeof(dashboard_url));
-    const int fetched = fetchToCacheResponsive(&options, dashboard_url);
+    const int fetched = fetchToCache(dashboard_url, options.read_token, options.cache);
     if (!g_running) break;
     if (!renderCachedPayload(&options, fetched ? "live" : "cached/offline")) {
       char lines[kMaxRows][96];
