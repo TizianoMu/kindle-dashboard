@@ -68,3 +68,17 @@ Thumbs.db
 .roo/
 .trae/
 .windsurf/
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf

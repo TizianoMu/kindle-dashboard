@@ -32,6 +32,7 @@ const char* kProfileCardLocalPath = "kindle/kual/kindle-dashboard/assets/profile
 const char* kRecipeAssetsPath = "/mnt/us/extensions/kindle-dashboard/assets/recipes";
 const char* kRecipeAssetsLocalPath = "kindle/kual/kindle-dashboard/assets/recipes";
 const int kDefaultIntervalSeconds = 3600;
+const int kOfflineRetrySeconds = 30;
 const char* kDefaultSleepWindow = "off";
 const long kMaxDashboardPayloadBytes = 512 * 1024;
 const int kScreenColumns = 40;
@@ -772,11 +773,11 @@ int renderLines(const Dashboard* dashboard, const char* status, char lines[][96]
   addCardText(lines, &count, mode);
   addRule(lines, &count);
   addSectionTitle(lines, &count, "Health");
-  addMetric(lines, &count, "STEPS", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
-  addMetric(lines, &count, "CAL", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
+  addMetric(lines, &count, "PASSI", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
+  addMetric(lines, &count, "CALORIE", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
   addRule(lines, &count);
   for (int i = 0; i < dashboard->list_count; i++) addList(lines, &count, &dashboard->lists[i]);
-  addCardText(lines, &count, " Telegram updates lists");
+  addCardText(lines, &count, " Telegram aggiorna le liste");
   addRule(lines, &count);
   return count;
 }
@@ -1203,14 +1204,14 @@ void drawRecipeLocalImage(Canvas* canvas, int x, int y, int w, int h, const Reci
 
 const char* displayListTitle(const List* list) {
   if (!list) return "";
-  if (strcmp(list->key, "todo") == 0) return "CHORES";
-  if (strcmp(list->key, "grocery") == 0) return "GROCERY";
+  if (strcmp(list->key, "todo") == 0) return "COSE DA FARE";
+  if (strcmp(list->key, "grocery") == 0) return "SPESA";
   return list->title[0] ? list->title : list->key;
 }
 
 const char* displayListTitleForIndex(const List* list, int list_index) {
-  if (list_index == 0) return "CHORES";
-  if (list_index == 1) return "GROCERY";
+  if (list_index == 0) return "COSE DA FARE";
+  if (list_index == 1) return "SPESA";
   return displayListTitle(list);
 }
 
@@ -1489,7 +1490,7 @@ int drawDaySwitchArrows(Canvas* canvas, int shell_x, int shell_y, int shell_w) {
   addTouchRegion(prev_rect, kTouchPreviousDay, -1, -1, "", 0);
 
   strokeRect(canvas, today_rect.x, today_rect.y, today_rect.w, today_rect.h, 2, 0);
-  drawTextCentered(canvas, today_rect.x + today_rect.w / 2, today_rect.y + 16, today_rect.w - 12, "TODAY", 2, 0);
+  drawTextCentered(canvas, today_rect.x + today_rect.w / 2, today_rect.y + 16, today_rect.w - 12, "OGGI", 2, 0);
   addTouchRegion(today_rect, kTouchToday, -1, -1, "", 0);
 
   strokeRect(canvas, next_rect.x, next_rect.y, next_rect.w, next_rect.h, 2, 0);
@@ -1503,12 +1504,12 @@ void drawTopHeader(Canvas* canvas, const Dashboard* dashboard, const char* statu
   const int header_h = 132;
   doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, header_h, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
-  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "DAILY OPS", 4, 0);
+  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
 
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
   Rect exit_hit_rect = {exit_rect.x - 20, kKindleStatusBarHeight, exit_rect.w + 40, exit_rect.y - kKindleStatusBarHeight + exit_rect.h + 20};
   strokeRect(canvas, exit_rect.x, exit_rect.y, exit_rect.w, exit_rect.h, 2, 0);
-  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "EXIT", 3, 0);
+  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "ESCI", 3, 0);
   addTouchRegion(exit_hit_rect, kTouchExit, -1, -1, "", 0);
   addTouchRegion(exit_rect, kTouchExit, -1, -1, "", 0);
 
@@ -1533,7 +1534,7 @@ void drawSubHeader(Canvas* canvas, int shell_x, int y, int shell_w, const char* 
   addTouchRegion(home_rect, kTouchHome, -1, -1, "", 0);
 
   strokeRect(canvas, back_rect.x, back_rect.y, back_rect.w, back_rect.h, 2, 0);
-  drawTextCentered(canvas, back_rect.x + back_rect.w / 2, back_rect.y + 16, back_rect.w - 12, "BACK", 2, 0);
+  drawTextCentered(canvas, back_rect.x + back_rect.w / 2, back_rect.y + 16, back_rect.w - 12, "INDIETRO", 2, 0);
   addTouchRegion(back_rect, kTouchBack, -1, -1, "", 0);
 }
 
@@ -1550,22 +1551,22 @@ void drawMealPlannerDashboard(Canvas* canvas, const Dashboard* dashboard, const 
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
 
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "MEAL PLANNER");
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "PIANO PASTI");
 
   const int cover_y = sub_y + 96;
   strokeRect(canvas, shell_x + 18, cover_y, shell_w - 36, 188, 3, 0);
   drawPgmImageCover(canvas, shell_x + 42, cover_y + 18, 250, 140, kMealCoverPath, kMealCoverLocalPath, framebufferInvertForVisibleImage(0));
-  drawTextClipped(canvas, shell_x + 320, cover_y + 32, shell_w - 352, "TODAY'S MEALS", 5, 0);
-  drawTextClipped(canvas, shell_x + 320, cover_y + 84, shell_w - 352, "EACH ROW OPENS", 3, 0);
-  drawTextClipped(canvas, shell_x + 320, cover_y + 118, shell_w - 352, "A RECIPE CARD", 3, 0);
+  drawTextClipped(canvas, shell_x + 320, cover_y + 32, shell_w - 352, "PASTI DI OGGI", 5, 0);
+  drawTextClipped(canvas, shell_x + 320, cover_y + 84, shell_w - 352, "OGNI RIGA APRE", 3, 0);
+  drawTextClipped(canvas, shell_x + 320, cover_y + 118, shell_w - 352, "UNA SCHEDA RICETTA", 3, 0);
 
   const int recipes_card_y = cover_y + 206;
   Rect recipes_rect = {shell_x + 18, recipes_card_y, shell_w - 36, 74};
   strokeRect(canvas, recipes_rect.x, recipes_rect.y, recipes_rect.w, recipes_rect.h, 3, 0);
   addTouchRegion(recipes_rect, kTouchOpenRecipes, -1, -1, "", 0);
-  drawTextClipped(canvas, recipes_rect.x + 20, recipes_rect.y + 18, recipes_rect.w - 260, "RECIPES", 5, 0);
+  drawTextClipped(canvas, recipes_rect.x + 20, recipes_rect.y + 18, recipes_rect.w - 260, "RICETTE", 5, 0);
   char count_text[64];
-  snprintf(count_text, sizeof(count_text), "%d SAVED", dashboard->recipe_count);
+  snprintf(count_text, sizeof(count_text), "%d SALVATE", dashboard->recipe_count);
   drawTextClipped(canvas, recipes_rect.x + recipes_rect.w - 210, recipes_rect.y + 24, 180, count_text, 3, 0);
 
   const int row_x = shell_x + 18;
@@ -1576,8 +1577,8 @@ void drawMealPlannerDashboard(Canvas* canvas, const Dashboard* dashboard, const 
   if (dashboard->meal_plan_count == 0) {
     Rect empty_rect = {row_x, first_y, row_w, 118};
     strokeRect(canvas, empty_rect.x, empty_rect.y, empty_rect.w, empty_rect.h, 2, 0);
-    drawTextClipped(canvas, empty_rect.x + 18, empty_rect.y + 22, empty_rect.w - 36, "NO MEALS PLANNED", 4, 0);
-    drawTextClipped(canvas, empty_rect.x + 18, empty_rect.y + 66, empty_rect.w - 36, "SET TODAY'S MEAL PLAN VIA TELEGRAM", 2, 0);
+    drawTextClipped(canvas, empty_rect.x + 18, empty_rect.y + 22, empty_rect.w - 36, "NESSUN PASTO", 4, 0);
+    drawTextClipped(canvas, empty_rect.x + 18, empty_rect.y + 66, empty_rect.w - 36, "IMPOSTA IL PIANO PASTI VIA TELEGRAM", 2, 0);
     return;
   }
   for (int i = 0; i < dashboard->meal_plan_count; i++) {
@@ -1590,14 +1591,14 @@ void drawMealPlannerDashboard(Canvas* canvas, const Dashboard* dashboard, const 
     strokeRect(canvas, row_rect.x, row_rect.y, row_rect.w, row_rect.h, 2, 0);
     addTouchRegion(row_rect, kTouchOpenMealPlanRecipe, -1, recipe_index, "", 0);
     char meal_label[32];
-    snprintf(meal_label, sizeof(meal_label), "MEAL %d", i + 1);
+    snprintf(meal_label, sizeof(meal_label), "PASTO %d", i + 1);
     drawTextClipped(canvas, row_x + 18, row_y + 14, 170, meal_label, 3, 0);
     drawTextClipped(canvas, row_x + 208, row_y + 14, row_w - 360, recipe->title, 4, 0);
     char macro_hint[96];
     snprintf(macro_hint, sizeof(macro_hint), "%d CAL  C%d F%d P%d", recipe->calories, recipe->carbs, recipe->fat, recipe->protein);
     drawTextClipped(canvas, row_x + 208, row_y + 52, row_w - 390, macro_hint, 2, 0);
     drawStarRating(canvas, row_x + row_w - 190, row_y + 16, recipe->rating_tenths, 2);
-    drawTextClipped(canvas, row_x + row_w - 176, row_y + 52, 154, "[ RECIPE ]", 2, 0);
+    drawTextClipped(canvas, row_x + row_w - 176, row_y + 52, 154, "[ RICETTA ]", 2, 0);
   }
 }
 
@@ -1614,7 +1615,7 @@ void drawRecipesDashboard(Canvas* canvas, const Dashboard* dashboard, const char
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
 
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RECIPES");
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RICETTE");
 
   const int gap = 10;
   const int card_w = (shell_w - 36 - gap) / 2;
@@ -1654,7 +1655,7 @@ void drawRecipeRecordDashboard(Canvas* canvas, const Dashboard* dashboard, const
   if (recipe_index < 0 || recipe_index >= dashboard->recipe_count) recipe_index = 0;
   const RecipeRecord* recipe = &dashboard->recipes[recipe_index];
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RECIPE");
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RICETTA");
 
   const int card_x = shell_x + 18;
   const int card_y = sub_y + 98;
@@ -1695,7 +1696,7 @@ void drawRecipeRecordDashboard(Canvas* canvas, const Dashboard* dashboard, const
   }
 
   const int ingredients_title_y = top_y + photo_h + 28;
-  drawTextClipped(canvas, content_x, ingredients_title_y, content_w, "INGREDIENTS", 3, 0);
+  drawTextClipped(canvas, content_x, ingredients_title_y, content_w, "INGREDIENTI", 3, 0);
   const int ingredient_y = ingredients_title_y + 40;
   const int ingredient_row_h = 34;
   const int amount_w = 180;
@@ -1709,7 +1710,7 @@ void drawRecipeRecordDashboard(Canvas* canvas, const Dashboard* dashboard, const
   }
   const int steps_y = ingredient_y + ingredients_shown * ingredient_row_h + 24;
   if (steps_y + 58 < card_y + card_h) {
-    drawTextClipped(canvas, content_x, steps_y, content_w, "STEPS", 3, 0);
+    drawTextClipped(canvas, content_x, steps_y, content_w, "PREPARAZIONE", 3, 0);
     drawTextWrapped(canvas, content_x, steps_y + 36, content_w, recipe->instructions, 2, 0, 4);
   }
 }
@@ -1729,7 +1730,7 @@ void drawRecipeDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   if (recipe_index < 0 || recipe_index >= kMealPlanCount) recipe_index = 0;
   const MealPlanEntry* meal = &kMealPlan[recipe_index];
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RECIPE");
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "RICETTA");
 
   const int card_x = shell_x + 18;
   const int card_y = sub_y + 98;
@@ -1769,7 +1770,7 @@ void drawRecipeDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   }
 
   const int ingredients_title_y = top_y + photo_h + 28;
-  drawTextClipped(canvas, content_x, ingredients_title_y, content_w, "INGREDIENTS", 3, 0);
+  drawTextClipped(canvas, content_x, ingredients_title_y, content_w, "INGREDIENTI", 3, 0);
   const int ingredient_y = ingredients_title_y + 42;
   const int ingredient_row_h = 38;
   const int amount_w = 160;
@@ -1783,7 +1784,7 @@ void drawRecipeDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   }
   const int steps_y = ingredient_y + ingredients_shown * ingredient_row_h + 24;
   if (steps_y + 68 < card_y + card_h) {
-    drawTextClipped(canvas, content_x, steps_y, content_w, "STEPS", 3, 0);
+    drawTextClipped(canvas, content_x, steps_y, content_w, "PREPARAZIONE", 3, 0);
     drawTextWrapped(canvas, content_x, steps_y + 44, content_w, meal->steps, 3, 0, 3);
   }
 }
@@ -1843,9 +1844,9 @@ void drawChallengeDashboard(Canvas* canvas, const Dashboard* dashboard, const ch
   drawTopHeader(canvas, dashboard, status, shell_x, shell_y, shell_w);
 
   const int sub_y = shell_y + 10 + 132 + 8;
-  drawSubHeader(canvas, shell_x, sub_y, shell_w, "75 DAY CHALLENGE");
+  drawSubHeader(canvas, shell_x, sub_y, shell_w, "SFIDA 75 GIORNI");
   char day_text[40];
-  snprintf(day_text, sizeof(day_text), "DAY %d // CURRENT DAY", dashboard->challenge_day);
+  snprintf(day_text, sizeof(day_text), "GIORNO %d // GIORNO CORRENTE", dashboard->challenge_day);
   drawTextClipped(canvas, shell_x + 36, sub_y + 88, shell_w - 72, day_text, 3, 0);
 
   const int gap = 10;
@@ -1860,13 +1861,13 @@ void drawChallengeDashboard(Canvas* canvas, const Dashboard* dashboard, const ch
   const int right_x = center_x + center_w + gap;
   const int card_h = (content_h - gap * 2) / 3;
 
-  drawRadialMetric(canvas, left_x, content_y, side_w, card_h, "PROTEIN", dashboard->protein_g, 100, "g");
-  drawRadialMetricTenths(canvas, left_x, content_y + card_h + gap, side_w, card_h, "WATER", dashboard->water_tenths, dashboard->water_target_tenths, "L");
-  drawRadialMetricTenths(canvas, left_x, content_y + (card_h + gap) * 2, side_w, card_h, "SLEEP", dashboard->sleep_tenths, dashboard->sleep_target_tenths, "h");
+  drawRadialMetric(canvas, left_x, content_y, side_w, card_h, "PROTEINE", dashboard->protein_g, 100, "g");
+  drawRadialMetricTenths(canvas, left_x, content_y + card_h + gap, side_w, card_h, "ACQUA", dashboard->water_tenths, dashboard->water_target_tenths, "L");
+  drawRadialMetricTenths(canvas, left_x, content_y + (card_h + gap) * 2, side_w, card_h, "SONNO", dashboard->sleep_tenths, dashboard->sleep_target_tenths, "h");
   drawChallengeStreakCard(canvas, center_x, content_y, center_w, content_h, dashboard->challenge_day);
-  drawRadialMetric(canvas, right_x, content_y, side_w, card_h, "WORKOUT", dashboard->workouts, dashboard->workout_target, "done");
-  drawRadialMetric(canvas, right_x, content_y + card_h + gap, side_w, card_h, "STEPS", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
-  drawRadialMetric(canvas, right_x, content_y + (card_h + gap) * 2, side_w, card_h, "CALORIES", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
+  drawRadialMetric(canvas, right_x, content_y, side_w, card_h, "ALLENAMENTO", dashboard->workouts, dashboard->workout_target, "fatti");
+  drawRadialMetric(canvas, right_x, content_y + card_h + gap, side_w, card_h, "PASSI", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
+  drawRadialMetric(canvas, right_x, content_y + (card_h + gap) * 2, side_w, card_h, "CALORIE", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
 }
 
 void drawCurrentDashboard(Canvas* canvas, const Dashboard* dashboard, const char* status) {
@@ -1959,11 +1960,11 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   const int header_h = 132;
   doubleRect(canvas, shell_x + 10, shell_y + 10, shell_w - 20, header_h, 0);
   const int arrow_left = drawDaySwitchArrows(canvas, shell_x, shell_y, shell_w);
-  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "DAILY OPS", 4, 0);
+  drawTextClipped(canvas, shell_x + 28, shell_y + 24, arrow_left - shell_x - 44, "AGENDA GIORNALIERA", 4, 0);
   Rect exit_rect = exitButtonRectForScreen(canvas->width, canvas->height);
   Rect exit_hit_rect = {exit_rect.x - 20, kKindleStatusBarHeight, exit_rect.w + 40, exit_rect.y - kKindleStatusBarHeight + exit_rect.h + 20};
   strokeRect(canvas, exit_rect.x, exit_rect.y, exit_rect.w, exit_rect.h, 2, 0);
-  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "EXIT", 3, 0);
+  drawTextCentered(canvas, exit_rect.x + exit_rect.w / 2, exit_rect.y + 34, exit_rect.w - 16, "ESCI", 3, 0);
   addTouchRegion(exit_hit_rect, kTouchExit, -1, -1, "", 0);
   addTouchRegion(exit_rect, kTouchExit, -1, -1, "", 0);
   line(canvas, shell_x + 20, shell_y + 88, exit_rect.x - 8, shell_y + 88, 2, 0);
@@ -1976,8 +1977,8 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   const int stat_h = shell_h < 900 ? 220 : 252;
   const int stat_w = (shell_w - 20 - gap * 2) / 3;
   drawImageCard(canvas, shell_x + 10, stat_y, stat_w, stat_h, kProfileCardPath, kProfileCardLocalPath);
-  drawRadialMetric(canvas, shell_x + 10 + stat_w + gap, stat_y, stat_w, stat_h, "STEPS", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
-  drawRadialMetric(canvas, shell_x + 10 + (stat_w + gap) * 2, stat_y, stat_w, stat_h, "CALORIES", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
+  drawRadialMetric(canvas, shell_x + 10 + stat_w + gap, stat_y, stat_w, stat_h, "PASSI", dashboard->steps, dashboard->steps_target, dashboard->steps_unit);
+  drawRadialMetric(canvas, shell_x + 10 + (stat_w + gap) * 2, stat_y, stat_w, stat_h, "CALORIE", dashboard->calories, dashboard->calories_target, dashboard->calories_unit);
 
   const int footer_h = 44;
   const int lists_y = stat_y + stat_h + gap;
@@ -2004,7 +2005,7 @@ void drawBitmapDashboard(Canvas* canvas, const Dashboard* dashboard, const char*
   }
 
   doubleRect(canvas, shell_x + 10, shell_y + shell_h - footer_h - 10, shell_w - 20, footer_h, 0);
-  drawTextClipped(canvas, shell_x + 28, shell_y + shell_h - footer_h - 2, shell_w - 56, "TELEGRAM UPDATES LISTS // AUTO REFRESH 15M", 3, 0);
+  drawTextClipped(canvas, shell_x + 28, shell_y + shell_h - footer_h - 2, shell_w - 56, "TELEGRAM AGGIORNA LE LISTE // AUTO REFRESH 15M", 3, 0);
 }
 
 int writePgm(const char* path, const Canvas* canvas) {
@@ -2307,11 +2308,11 @@ void flashTouchRectOnFramebuffer(Rect rect) {
   const int right = rect.x + rect.w > static_cast<int>(vinfo.xres) ? static_cast<int>(vinfo.xres) : rect.x + rect.w;
   const int bottom = rect.y + rect.h > static_cast<int>(vinfo.yres) ? static_cast<int>(vinfo.yres) : rect.y + rect.h;
   invertFramebufferArea(fb, &vinfo, &finfo, left, top, right, bottom, 0);
-  msync(fb, screensize, MS_SYNC);
+
   system("eips '' >/dev/null 2>&1 || true");
   usleep(120000);
   invertFramebufferArea(fb, &vinfo, &finfo, left, top, right, bottom, 0);
-  msync(fb, screensize, MS_SYNC);
+
   munmap(fb, screensize);
   close(fd);
   system("eips '' >/dev/null 2>&1 || true");
@@ -2365,7 +2366,7 @@ int renderToFramebuffer(const Dashboard* dashboard, const char* status, const ch
     for (int x = 0; x < canvas.width; x++) putFramebufferPixel(fb, &vinfo, &finfo, x, y, canvas.pixels[y * canvas.width + x]);
   }
   free(canvas.pixels);
-  msync(fb, screensize, MS_SYNC);
+
   munmap(fb, screensize);
   close(fd);
   system("eips '' >/dev/null 2>&1 || true");
@@ -2542,6 +2543,35 @@ int fetchToCache(const char* url, const char* read_token, const char* cache) {
   free(payload_check);
   fprintf(stderr, "timing=fetch ok=1 ms=%lld\n", monotonicMs() - started);
   return 1;
+}
+
+// Runs fetchToCache on a worker thread so the main loop stays responsive to
+// touches while curl is blocked (e.g. Wi-Fi associated but no connectivity,
+// where a single attempt can stall for tens of seconds). Ownership of the job
+// is shared: whichever side observes the fetch as unfinished last frees it.
+struct FetchJob {
+  char url[320];
+  char read_token[160];
+  char cache[256];
+  pthread_mutex_t lock;
+  int done;
+  int result;
+  int abandoned;
+};
+
+void* fetchJobMain(void* raw) {
+  FetchJob* job = static_cast<FetchJob*>(raw);
+  const int result = fetchToCache(job->url, job->read_token, job->cache);
+  pthread_mutex_lock(&job->lock);
+  job->result = result;
+  job->done = 1;
+  const int abandoned = job->abandoned;
+  pthread_mutex_unlock(&job->lock);
+  if (abandoned) {
+    pthread_mutex_destroy(&job->lock);
+    free(job);
+  }
+  return NULL;
 }
 
 int writeTextFileAtomic(const char* path, const char* data, size_t size) {
@@ -3127,6 +3157,53 @@ int waitForWakeEvent(const Options* options, int seconds, int allow_repaint) {
   return 1;
 }
 
+// Fetches into the cache without blocking the UI: while the worker thread runs
+// curl, the main thread keeps servicing touches so exit and navigation stay
+// responsive. Returns 1 if the fetch succeeded, 0 otherwise.
+int fetchToCacheResponsive(const Options* options, const char* url) {
+  FetchJob* job = static_cast<FetchJob*>(calloc(1, sizeof(FetchJob)));
+  if (!job) return fetchToCache(url, options->read_token, options->cache);
+  copyText(job->url, sizeof(job->url), url);
+  copyText(job->read_token, sizeof(job->read_token), options->read_token);
+  copyText(job->cache, sizeof(job->cache), options->cache);
+  pthread_mutex_init(&job->lock, NULL);
+
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, fetchJobMain, job) != 0) {
+    const int result = fetchToCache(job->url, job->read_token, job->cache);
+    pthread_mutex_destroy(&job->lock);
+    free(job);
+    return result;
+  }
+  pthread_detach(thread);
+
+  while (1) {
+    pthread_mutex_lock(&job->lock);
+    const int done = job->done;
+    const int result = job->result;
+    if (done) {
+      // Worker finished and left ownership to us (it saw abandoned == 0).
+      pthread_mutex_unlock(&job->lock);
+      pthread_mutex_destroy(&job->lock);
+      free(job);
+      return result;
+    }
+    if (!g_running) {
+      // Give up waiting; hand ownership to the detached worker.
+      job->abandoned = 1;
+      pthread_mutex_unlock(&job->lock);
+      return 0;
+    }
+    pthread_mutex_unlock(&job->lock);
+
+    if (g_pending_action != kTouchNone) {
+      const int touch_result = handlePendingTouch(options);
+      if (g_running && touch_result == 1) renderCachedPayload(options, "cached/local");
+    }
+    usleep(200000);
+  }
+}
+
 void handleSignal(int) {
   g_running = 0;
 }
@@ -3295,7 +3372,8 @@ int main(int argc, char** argv) {
     }
     char dashboard_url[320];
     buildDashboardUrl(options.url, dashboard_url, sizeof(dashboard_url));
-    const int fetched = fetchToCache(dashboard_url, options.read_token, options.cache);
+    const int fetched = fetchToCacheResponsive(&options, dashboard_url);
+    if (!g_running) break;
     if (!renderCachedPayload(&options, fetched ? "live" : "cached/offline")) {
       char lines[kMaxRows][96];
       int count = 0;
@@ -3308,10 +3386,14 @@ int main(int argc, char** argv) {
     }
 
     if (options.once) break;
-    for (int remaining = options.interval; remaining > 0 && g_running;) {
+    // Recover quickly when connectivity returns: a failed fetch retries after a
+    // short delay instead of waiting the full refresh interval (up to an hour).
+    int wait_seconds = options.interval;
+    if (!fetched && wait_seconds > kOfflineRetrySeconds) wait_seconds = kOfflineRetrySeconds;
+    for (int remaining = wait_seconds; remaining > 0 && g_running;) {
       if (inSleepWindow(options.sleep_start_minute, options.sleep_end_minute)) break;
       const int chunk = remaining > 60 ? 60 : remaining;
-      waitForWakeEvent(&options, chunk, remaining == options.interval);
+      waitForWakeEvent(&options, chunk, remaining == wait_seconds);
       if (g_event_refresh) break;
       remaining -= chunk;
     }
