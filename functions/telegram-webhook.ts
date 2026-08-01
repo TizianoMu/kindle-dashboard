@@ -147,7 +147,7 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
           content:
             [
               "Parse one Telegram dashboard message into strict JSON.",
-              "For planner/list updates return: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"short item\"],\"all_lists\":false}. Use list_key \"todo\" for chores/tasks. Use [] only for clear.",
+              "For planner/list updates return: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"short item\"],\"all_lists\":false}. Use list_key \"todo\" for chores/tasks. Use [] only for clear. Messages may be written in Italian. Interpret spesa, lista della spesa and supermercato as grocery. Interpret da fare, cose da fare, promemoria, attività and compiti as todo. Interpret allenamento and palestra as workout. Interpret pasti and cibo as meal. Italian planner verbs: aggiungi / metti / compra = add; segna/ spunta / completa / fatto = complete; riapri/ ripristina / non fatto = uncomplete; rimuovi/ elimina / cancella / togli = delete; svuota / azzera = clear.",
               "For health targets return: {\"kind\":\"target\",\"action\":\"set_target\",\"metric\":\"steps|calories\",\"value\":12000,\"unit\":\"steps|kcal\"}.",
               "For 75 day challenge check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout\",\"value\":1}. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout.",
               "For today's meal plan made from saved recipes return: {\"kind\":\"meal_plan\",\"action\":\"add_meal|set_meal_plan|clear_meal_plan\",\"recipes\":[\"Saved Recipe Title\"]}. Use add_meal for adding/include/put another meal; use set_meal_plan only when replacing the whole plan.",
@@ -616,33 +616,51 @@ function parseMessageHeuristically(message: string): TelegramAction {
   const explicitList = hasExplicitList(normalized);
 
   let action: PlannerAction["action"] = "add";
-  if (/\b(undo|uncheck|not done|incomplete)\b/.test(lower)) {
+  if (/\b(undo|uncheck|not done|incomplete|riapri|ripristina|deseleziona|non fatto|non completato|da rifare)\b/i.test(lower)) {
     action = "uncomplete";
-  } else if (/\b(delete|remove|drop)\b/.test(lower)) {
+  } else if (/\b(delete|remove|drop|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere)\b/i.test(lower)) {
     action = "delete";
-  } else if (/\b(clear|empty|reset)\b/.test(lower)) {
+  } else if (/\b(clear|empty|reset|svuota|svuotare|azzera|azzerare|pulisci)\b/i.test(lower)) {
     action = "clear";
-  } else if (/\b(done|complete|completed|check off|mark)\b/.test(lower)) {
+  } else if (/\b(done|complete|completed|check off|mark|fatto|fatta|fatti|fatte|completa|completato|completata|segna|spunta|spuntato|spuntata)\b/i.test(lower)) {
     action = "complete";
   }
-
   const withoutActionFirst = normalized
-    .replace(/^(please\s+)?(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset)\s+/i, "")
-    .replace(/\s+(done|complete|completed)$/i, "")
-    .replace(/\s+(to|in|on|from)\s+(my\s+)?(grocery|groceries|shopping|market|workout|exercise|training|gym|meal|meals|menu|food|todo|to-do|task|tasks|errand|errands)(\s+list|\s+plan)?$/i, "")
-    .replace(/\s+(to|in|on|from)$/i, "")
+    .replace(
+      /^(please\s+|per favore\s+)?(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|aggiungere|metti|inserisci|includi|compra|comprare|segna|spunta|completa|completato|riapri|ripristina|deseleziona|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere|svuota|svuotare|azzera|azzerare|pulisci)\s+/i,
+      ""
+    )
+    .replace(
+      /\s+(?:come\s+)?(done|complete|completed|fatto|fatta|fatti|fatte|completato|completata|spuntato|spuntata)$/i,
+      ""
+    )
+    .replace(
+      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)\s+(my\s+|mia\s+|mio\s+|mie\s+|miei\s+|la\s+|il\s+|lo\s+|le\s+|i\s+|gli\s+)?(grocery|groceries|shopping|market|spesa|lista della spesa|supermercato|workout|exercise|training|gym|allenamento|allenamenti|palestra|meal|meals|menu|food|pasto|pasti|menù|cibo|pranzo|cena|colazione|todo|to-do|task|tasks|errand|errands|chores|da fare|cose da fare|promemoria|attività|compito|compiti)(\s+list|\s+plan|\s+lista|\s+piano)?$/i,
+      ""
+    )
+    .replace(
+      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)$/i,
+      ""
+    )
     .trim();
   const withoutAction = stripListWords(withoutActionFirst, listKey)
-    .replace(/\s+(to|in|on|from)$/i, "")
+    .replace(
+      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)$/i,
+      ""
+    )
     .trim();
 
   const items =
     action === "clear"
       ? []
       : withoutAction
-          .split(/\s*(?:,| and |\+)\s*/i)
-          .map((item) => item.replace(/^the\s+/i, "").trim())
-          .filter(Boolean);
+        .split(/\s*(?:,|;|\+|\be\b|\bed\b)\s*/i)
+        .map((item) =>
+          item
+            .replace(/^(the|il|lo|la|i|gli|le|un|uno|una)\s+/i, "")
+            .trim()
+        )
+        .filter(Boolean);
 
   return {
     kind: "planner",
@@ -1018,7 +1036,10 @@ function stripListWords(message: string, listKey: ListKey): string {
   for (const alias of LIST_ALIASES[listKey]) {
     output = output.replace(new RegExp(`\\b${escapeRegExp(alias)}\\b`, "ig"), "");
   }
-  return output.replace(/\s+(list|plan)\b/gi, " ").replace(/\s+/g, " ").trim();
+  return output
+    .replace(/\s+(list|plan|lista|piano)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function escapeRegExp(value: string): string {

@@ -193,11 +193,53 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
 List names also have hardcoded aliases:
 
 ```ts
-const LIST_ALIASES = {
-  grocery: ["grocery", "groceries", "shopping", "market"],
-  workout: ["workout", "exercise", "training", "gym"],
-  meal: ["meal", "meals", "menu", "food"],
-  todo: ["todo", "to-do", "task", "tasks", "errand", "errands"]
+const LIST_ALIASES: Record<ListKey, string[]> = {
+  grocery: [
+    "grocery",
+    "groceries",
+    "shopping",
+    "market",
+    "spesa",
+    "lista della spesa",
+    "supermercato"
+  ],
+  workout: [
+    "workout",
+    "exercise",
+    "training",
+    "gym",
+    "allenamento",
+    "allenamenti",
+    "palestra"
+  ],
+  meal: [
+    "meal",
+    "meals",
+    "menu",
+    "food",
+    "pasto",
+    "pasti",
+    "menù",
+    "cibo",
+    "pranzo",
+    "cena",
+    "colazione"
+  ],
+  todo: [
+    "todo",
+    "to-do",
+    "task",
+    "tasks",
+    "errand",
+    "errands",
+    "chores",
+    "da fare",
+    "cose da fare",
+    "promemoria",
+    "attività",
+    "compito",
+    "compiti"
+  ]
 };
 ```
 
