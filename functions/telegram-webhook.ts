@@ -65,7 +65,7 @@ type TelegramUpdate = {
   };
 };
 
-export default async function(req: Request): Promise<Response> {
+export default async function (req: Request): Promise<Response> {
   const started = timeMs();
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
@@ -101,7 +101,7 @@ export default async function(req: Request): Promise<Response> {
   const action = await parseTelegramMessage(text);
   const parseMs = elapsedMs(parseStarted);
   if (!action) {
-    sendTelegramMessageInBackground(chatId, "I could not understand that update.");
+    sendTelegramMessageInBackground(chatId, "Non ho capito il comando. Prova a indicare chiaramente azione, elemento e lista.");
     return jsonResponse({ ok: true, ignored: true, reason: "unparsed" });
   }
 
@@ -146,8 +146,8 @@ async function parseTelegramMessage(message: string): Promise<TelegramAction | n
           role: "system",
           content:
             [
-              "Parse one Telegram dashboard message into strict JSON.",
-              "For planner/list updates return: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"short item\"],\"all_lists\":false}. Use list_key \"todo\" for chores/tasks. Use [] only for clear. Messages may be written in Italian. Interpret spesa, lista della spesa and supermercato as grocery. Interpret da fare, cose da fare, promemoria, attività and compiti as todo. Interpret allenamento and palestra as workout. Interpret pasti and cibo as meal. Italian planner verbs: aggiungi / metti / compra = add; segna/ spunta / completa / fatto = complete; riapri/ ripristina / non fatto = uncomplete; rimuovi/ elimina / cancella / togli = delete; svuota / azzera = clear.",
+              "Interpreta un messaggio Telegram, in italiano o inglese, e restituisci esclusivamente JSON valido.",
+              "Per le liste restituisci: {\"kind\":\"planner\",\"action\":\"add|complete|uncomplete|delete|clear\",\"list_key\":\"grocery|workout|meal|todo\",\"items\":[\"elemento breve\"],\"all_lists\":false}. Usa grocery per spesa/lista della spesa/supermercato; todo per cose da fare/promemoria/compiti; workout per allenamento/palestra; meal per pasti/cibo. Verbi italiani: aggiungi/metti/inserisci/compra = add; segna/spunta/completa/fatto = complete; riapri/ripristina/non fatto = uncomplete; rimuovi/elimina/cancella/togli = delete; svuota/azzera/pulisci = clear. Per clear usa items: []. Rimuovi articoli e preposizioni dagli elementi, ad esempio 'Aggiungi il tè freddo alla spesa' deve produrre items:[\"tè freddo\"], list_key:\"grocery\".",
               "For health targets return: {\"kind\":\"target\",\"action\":\"set_target\",\"metric\":\"steps|calories\",\"value\":12000,\"unit\":\"steps|kcal\"}.",
               "For 75 day challenge check-ins return: {\"kind\":\"challenge\",\"action\":\"add_water|set_sleep|add_workout\",\"value\":1}. Treat XL water as 1 liter, sleep value as hours, and workout value as one completed workout.",
               "For today's meal plan made from saved recipes return: {\"kind\":\"meal_plan\",\"action\":\"add_meal|set_meal_plan|clear_meal_plan\",\"recipes\":[\"Saved Recipe Title\"]}. Use add_meal for adding/include/put another meal; use set_meal_plan only when replacing the whole plan.",
@@ -196,7 +196,7 @@ async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<
       .delete()
       .eq("date", date);
     if (deleteError) throw deleteError;
-    return "Cleared today's meal plan.";
+    return "Piano pasti di oggi svuotato.";
   }
 
   let selected: Array<{ id: string; title: string }> = [];
@@ -218,7 +218,7 @@ async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<
     selected.push({ id: String(row.id), title: String(row.title) });
   }
 
-  if (selected.length === 0) return `No saved recipes matched: ${action.recipes.join(", ")}.`;
+  if (selected.length === 0) return `Nessuna ricetta salvata trovata per: ${action.recipes.join(", ")}.`;
 
   const { data: existingRows, error: existingError } = await admin.database
     .from("meal_plan_entries")
@@ -243,8 +243,8 @@ async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<
   } else {
     selected = selected.filter((recipe) => !existingRecipeIds.has(recipe.id));
     if (selected.length === 0) {
-      const suffix = missing.length > 0 ? ` Missing: ${missing.join(", ")}.` : "";
-      return `Already in today's meal plan: ${action.recipes.join(", ")}.${suffix}`;
+      const suffix = missing.length > 0 ? ` Non trovate: ${missing.join(", ")}.` : "";
+      return `Già presenti nel piano pasti di oggi: ${action.recipes.join(", ")}.${suffix}`;
     }
   }
 
@@ -256,8 +256,8 @@ async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<
   const { error } = await admin.database.from("meal_plan_entries").insert(rows);
   if (error) throw error;
 
-  const suffix = missing.length > 0 ? ` Missing: ${missing.join(", ")}.` : "";
-  const verb = action.action === "set_meal_plan" ? "Set today's meal plan" : "Added to today's meal plan";
+  const suffix = missing.length > 0 ? ` Non trovate: ${missing.join(", ")}.` : "";
+  const verb = action.action === "set_meal_plan" ? "Piano pasti di oggi impostato" : "Aggiunto al piano pasti di oggi";
   return `${verb}: ${selected.map((recipe) => recipe.title).join(", ")}.${suffix}`;
 }
 
@@ -301,9 +301,9 @@ async function applyChallengeAction(admin: any, action: ChallengeAction): Promis
     if (error) throw error;
   }
 
-  if (action.action === "add_water") return `Logged ${formatNumber(action.value)}L water today (${formatNumber(next.water_l)}/3L).`;
-  if (action.action === "set_sleep") return `Logged sleep: ${formatNumber(next.sleep_hours)}/8h.`;
-  return `Logged workout ${next.workouts}/2 today.`;
+  if (action.action === "add_water") return `Registrati ${formatNumber(action.value)} L di acqua oggi (${formatNumber(next.water_l)}/3 L).`;
+  if (action.action === "set_sleep") return `Sonno registrato: ${formatNumber(next.sleep_hours)}/8 ore.`;
+  return `Allenamento registrato: ${next.workouts}/2 oggi.`;
 }
 
 async function applyPlannerAction(admin: any, action: PlannerAction): Promise<string> {
@@ -314,14 +314,14 @@ async function applyPlannerAction(admin: any, action: PlannerAction): Promise<st
       .delete()
       .eq("list_key", action.list_key);
     if (error) throw error;
-    return `Cleared ${listName}.`;
+    return `Lista ${listName} svuotata.`;
   }
 
   if (action.action === "add") {
     const rows = action.items.map((text) => ({ list_key: action.list_key, text, done: false }));
     const { error } = await admin.database.from("planner_items").insert(rows);
     if (error) throw error;
-    return `Added ${action.items.join(", ")} to ${listName}.`;
+    return `Aggiunto a ${listName}: ${action.items.join(", ")}.`;
   }
 
   const done = action.action === "complete";
@@ -337,7 +337,7 @@ async function applyPlannerAction(admin: any, action: PlannerAction): Promise<st
       const { error } = await query;
       if (error) throw error;
     }
-    return `${done ? "Marked done" : "Marked open"}: ${action.items.join(", ")}.`;
+    return `${done ? "Segnato come completato" : "Riaperto"}: ${action.items.join(", ")}.`;
   }
 
   for (const item of action.items) {
@@ -352,11 +352,17 @@ async function applyPlannerAction(admin: any, action: PlannerAction): Promise<st
     if (error) throw error;
   }
 
-  return `Removed ${action.items.join(", ")} from ${listName}.`;
+  return `Rimosso da ${listName}: ${action.items.join(", ")}.`;
 }
 
 function plannerListLabel(listKey: ListKey): string {
-  return listKey === "todo" ? "chores" : listKey;
+  const labels: Record<ListKey, string> = {
+    grocery: "spesa",
+    workout: "allenamento",
+    meal: "pasti",
+    todo: "cose da fare"
+  };
+  return labels[listKey];
 }
 
 async function applyHealthTargetAction(admin: any, action: HealthTargetAction): Promise<string> {
@@ -383,7 +389,7 @@ async function applyHealthTargetAction(admin: any, action: HealthTargetAction): 
     if (error) throw error;
   }
 
-  return `Set ${action.metric} target to ${formatNumber(action.value)} ${unit}.`;
+  return `Obiettivo ${action.metric === "steps" ? "passi" : "calorie"} impostato a ${formatNumber(action.value)} ${unit}.`;
 }
 
 async function applyRecipeRatingAction(admin: any, action: RecipeRatingAction): Promise<string> {
@@ -395,7 +401,7 @@ async function applyRecipeRatingAction(admin: any, action: RecipeRatingAction): 
   if (selectError) throw selectError;
 
   const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
-  if (!row?.id) return `No saved meal matched: ${action.title}.`;
+  if (!row?.id) return `Nessuna ricetta salvata trovata per: ${action.title}.`;
 
   const rating = clampRecipeRating(action.rating);
   const { error } = await admin.database
@@ -404,7 +410,7 @@ async function applyRecipeRatingAction(admin: any, action: RecipeRatingAction): 
     .eq("id", row.id);
   if (error) throw error;
 
-  return `Rated ${row.title}: ${formatNumber(rating)}/5.`;
+  return `Valutazione di ${row.title}: ${formatNumber(rating)}/5.`;
 }
 
 async function applyRecipeAction(admin: any, action: RecipeAction): Promise<string> {
@@ -462,7 +468,7 @@ async function applyRecipeAction(admin: any, action: RecipeAction): Promise<stri
     if (error) throw error;
   }
 
-  return `Saved recipe: ${action.title} (${formatNumber(action.total_calories)} cal, C${formatNumber(action.carbs_g)} F${formatNumber(action.fat_g)} P${formatNumber(action.protein_g)}, ${formatNumber(action.rating)}/5).`;
+  return `Ricetta salvata: ${action.title} (${formatNumber(action.total_calories)} cal, carboidrati ${formatNumber(action.carbs_g)} g, grassi ${formatNumber(action.fat_g)} g, proteine ${formatNumber(action.protein_g)} g, voto ${formatNumber(action.rating)}/5).`;
 }
 
 async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
@@ -500,7 +506,7 @@ function parseFastHeuristicMessage(message: string): TelegramAction | null {
   const targetAction = parseTargetHeuristically(normalized);
   if (targetAction) return targetAction;
 
-  const hasPlannerVerb =/\b(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|compra|segna|completa|spuntare|spunta|riapri|rimuovi|elimina|cancella|svuota)\b/i.test(lower);
+  const hasPlannerVerb = /\b(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|aggiungere|metti|inserisci|includi|compra|comprare|serve|servono|segna|completa|completato|spuntare|spunta|riapri|ripristina|deseleziona|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere|svuota|svuotare|azzera|azzerare|pulisci)\b/i.test(lower);
   if (hasPlannerVerb && hasExplicitList(normalized)) {
     return parseMessageHeuristically(normalized);
   }
@@ -541,9 +547,8 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
     "market",
     "spesa",
     "lista della spesa",
-    "supermercato",
-    "comprare",
-    "compra"
+    "lista spesa",
+    "supermercato"
   ],
   workout: [
     "workout",
@@ -551,6 +556,7 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
     "training",
     "gym",
     "allenamento",
+    "allenamenti",
     "palestra"
   ],
   meal: [
@@ -565,7 +571,7 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
     "pranzo",
     "cena",
     "colazione"
-    
+
   ],
   todo: [
     "todo",
@@ -587,9 +593,8 @@ const LIST_ALIASES: Record<ListKey, string[]> = {
 const LIST_KEYS: ListKey[] = ["grocery", "workout", "meal", "todo"];
 
 function detectListKey(message: string): ListKey {
-  const lower = message.toLowerCase();
   for (const key of LIST_KEYS) {
-    if (LIST_ALIASES[key].some((alias) => lower.includes(alias))) return key;
+    if (LIST_ALIASES[key].some((alias) => containsAlias(message, alias))) return key;
   }
   return "todo";
 }
@@ -616,7 +621,7 @@ function parseMessageHeuristically(message: string): TelegramAction {
   const explicitList = hasExplicitList(normalized);
 
   let action: PlannerAction["action"] = "add";
-  if (/\b(undo|uncheck|not done|incomplete|riapri|ripristina|deseleziona|non fatto|non completato|da rifare)\b/i.test(lower)) {
+  if (/\b(undo|uncheck|not done|incomplete|riapri|riaperto|ripristina|deseleziona|non fatto|non fatta|non completato|non completata|da rifare)\b/i.test(lower)) {
     action = "uncomplete";
   } else if (/\b(delete|remove|drop|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere)\b/i.test(lower)) {
     action = "delete";
@@ -625,48 +630,29 @@ function parseMessageHeuristically(message: string): TelegramAction {
   } else if (/\b(done|complete|completed|check off|mark|fatto|fatta|fatti|fatte|completa|completato|completata|segna|spunta|spuntato|spuntata)\b/i.test(lower)) {
     action = "complete";
   }
-  const withoutActionFirst = normalized
-    .replace(
-      /^(please\s+|per favore\s+)?(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|aggiungere|metti|inserisci|includi|compra|comprare|segna|spunta|completa|completato|riapri|ripristina|deseleziona|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere|svuota|svuotare|azzera|azzerare|pulisci)\s+/i,
-      ""
-    )
-    .replace(
-      /\s+(?:come\s+)?(done|complete|completed|fatto|fatta|fatti|fatte|completato|completata|spuntato|spuntata)$/i,
-      ""
-    )
-    .replace(
-      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)\s+(my\s+|mia\s+|mio\s+|mie\s+|miei\s+|la\s+|il\s+|lo\s+|le\s+|i\s+|gli\s+)?(grocery|groceries|shopping|market|spesa|lista della spesa|supermercato|workout|exercise|training|gym|allenamento|allenamenti|palestra|meal|meals|menu|food|pasto|pasti|menù|cibo|pranzo|cena|colazione|todo|to-do|task|tasks|errand|errands|chores|da fare|cose da fare|promemoria|attività|compito|compiti)(\s+list|\s+plan|\s+lista|\s+piano)?$/i,
-      ""
-    )
-    .replace(
-      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)$/i,
-      ""
-    )
-    .trim();
-  const withoutAction = stripListWords(withoutActionFirst, listKey)
-    .replace(
-      /\s+(to|in|on|from|into|a|alla|alle|al|allo|nel|nella|nelle|sul|sulla|dalla|dalle|dal|dallo|da)$/i,
-      ""
-    )
+
+  let itemText = normalized
+    .replace(/^(please\s+|per favore\s+)?(add|put|include|buy|get|need|mark|check off|complete|completed|done|undo|uncheck|delete|remove|drop|clear|empty|reset|aggiungi|aggiungere|metti|inserisci|includi|compra|comprare|serve|servono|segna|spunta|completa|completato|completata|riapri|riaperto|ripristina|deseleziona|rimuovi|rimuovere|elimina|eliminare|cancella|cancellare|togli|togliere|svuota|svuotare|azzera|azzerare|pulisci)\s+/i, "")
+    .replace(/\s+(?:come\s+)?(done|complete|completed|fatto|fatta|fatti|fatte|completato|completata|spuntato|spuntata)$/i, "")
     .trim();
 
-  const items =
-    action === "clear"
-      ? []
-      : withoutAction
-        .split(/\s*(?:,|;|\+|\be\b|\bed\b)\s*/i)
-        .map((item) =>
-          item
-            .replace(/^(the|il|lo|la|i|gli|le|un|uno|una)\s+/i, "")
-            .trim()
-        )
-        .filter(Boolean);
+  itemText = stripAllListWords(itemText)
+    .replace(/\s+(to|in|on|from|into|for|a|ad|alla|alle|al|allo|ai|agli|nel|nella|nelle|nei|negli|sul|sulla|sulle|sui|sugli|dalla|dalle|dal|dallo|dai|dagli|da)$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const items = action === "clear"
+    ? []
+    : itemText
+      .split(/\s*(?:,|;|\+|\be\b|\bed\b)\s*/i)
+      .map((item) => item.replace(/^(the|il|lo|la|i|gli|le|un|uno|una)\s+/i, "").trim())
+      .filter(Boolean);
 
   return {
     kind: "planner",
     action,
     list_key: listKey,
-    items: items.length > 0 ? items : [withoutAction || normalized],
+    items: items.length > 0 ? items : [itemText || normalized],
     all_lists: !explicitList && (action === "complete" || action === "uncomplete" || action === "delete")
   };
 }
@@ -763,8 +749,8 @@ function validateRecipeAction(input: unknown): RecipeAction | null {
   if (!Number.isFinite(rating) || rating < 0 || rating > 5) return null;
   const ingredients = Array.isArray(candidate.ingredients)
     ? candidate.ingredients
-        .map((ingredient) => normalizeRecipeIngredient(ingredient))
-        .filter((ingredient): ingredient is RecipeIngredientInput => ingredient !== null)
+      .map((ingredient) => normalizeRecipeIngredient(ingredient))
+      .filter((ingredient): ingredient is RecipeIngredientInput => ingredient !== null)
     : [];
   return {
     kind: "recipe",
@@ -813,10 +799,10 @@ function normalizeRecipeIngredient(input: unknown): RecipeIngredientInput | null
 function parseTargetHeuristically(message: string): HealthTargetAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
-  if (!/\b(target|goal|set|change|update)\b/.test(lower)) return null;
-  const metric = /\b(step|steps)\b/.test(lower) ? "steps" : /\b(calorie|calories|kcal)\b/.test(lower) ? "calories" : null;
+  if (!/\b(target|goal|set|change|update|obiettivo|imposta|cambia|aggiorna)\b/.test(lower)) return null;
+  const metric = /\b(step|steps|passo|passi)\b/.test(lower) ? "steps" : /\b(caloria|calorie|calories|kcal)\b/.test(lower) ? "calories" : null;
   if (!metric) return null;
-  const valueMatch = normalized.match(/(?:to|at|=|goal|target)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i) ?? normalized.match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);
+  const valueMatch = normalized.match(/(?:to|at|=|goal|target|a|ad|obiettivo)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i) ?? normalized.match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);
   if (!valueMatch) return null;
   const value = Number(valueMatch[1].replace(/,/g, ""));
   if (!Number.isFinite(value) || value <= 0) return null;
@@ -833,20 +819,20 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
 
-  if (/\b(slept|sleep)\b/.test(lower)) {
-    const hours = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:h|hr|hrs|hour|hours)\b/i)
-      ?? extractMacroNumber(normalized, /\b(?:slept|sleep)\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+  if (/\b(slept|sleep|dormito|sonno)\b/.test(lower)) {
+    const hours = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:h|hr|hrs|hour|hours|ora|ore)\b/i)
+      ?? extractMacroNumber(normalized, /\b(?:slept|sleep|dormito|sonno)\s+([0-9][0-9,]*(?:\.[0-9]+)?)/i);
     if (hours && hours > 0) return { kind: "challenge", action: "set_sleep", value: hours };
   }
 
-  if (/\b(water|hydrated|drank|drink)\b/.test(lower)) {
-    const liters = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:l|liter|liters|litre|litres)\b/i);
-    const milliliters = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:ml|milliliter|milliliters|millilitre|millilitres)\b/i);
+  if (/\b(water|hydrated|drank|drink|acqua|bevuto|bevo)\b/.test(lower)) {
+    const liters = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:l|liter|liters|litre|litres|litro|litri)\b/i);
+    const milliliters = extractMacroNumber(normalized, /([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:ml|milliliter|milliliters|millilitre|millilitres|millilitro|millilitri)\b/i);
     const amount = liters ?? (milliliters ? milliliters / 1000 : /\bxl\s+water\b|\bwater\s+xl\b/.test(lower) ? 1 : 1);
     return { kind: "challenge", action: "add_water", value: roundOneDecimal(amount) };
   }
 
-  if (/\b(workout|exercise|training|gym)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark)\b/.test(lower)) {
+  if (/\b(workout|exercise|training|gym|allenamento|palestra)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|completato|finito)\b/.test(lower)) {
     return { kind: "challenge", action: "add_workout", value: 1 };
   }
 
@@ -1031,6 +1017,25 @@ function dashboardLocalDate(): string {
   return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
+function stripAllListWords(message: string): string {
+  let output = message;
+  const aliases = LIST_KEYS
+    .flatMap((key) => LIST_ALIASES[key])
+    .sort((a, b) => b.length - a.length);
+
+  for (const alias of aliases) {
+    output = output.replace(
+      new RegExp(`(^|\\s|[.,;:!?()])${escapeRegExp(alias)}(?=$|\\s|[.,;:!?()])`, "ig"),
+      "$1"
+    );
+  }
+
+  return output
+    .replace(/\b(lista|list|piano|plan)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function stripListWords(message: string, listKey: ListKey): string {
   let output = message;
   for (const alias of LIST_ALIASES[listKey]) {
@@ -1047,6 +1052,13 @@ function escapeRegExp(value: string): string {
 }
 
 function hasExplicitList(message: string): boolean {
-  const lower = message.toLowerCase();
-  return LIST_KEYS.some((key) => LIST_ALIASES[key].some((alias) => lower.includes(alias)));
+  return LIST_KEYS.some((key) => LIST_ALIASES[key].some((alias) => containsAlias(message, alias)));
+}
+
+function containsAlias(message: string, alias: string): boolean {
+  return new RegExp(`(^|\\s|[.,;:!?()])${escapeRegExp(alias)}(?=$|\\s|[.,;:!?()])`, "i").test(message);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
