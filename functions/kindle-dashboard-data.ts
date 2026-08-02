@@ -33,6 +33,8 @@ type ChallengeLog = {
   participant: "gaia" | "tiziano";
   steps: number;
   sports: string;
+  workout_minutes: number;
+  sport_minutes: Record<string, number>;
   water_l: string | number;
   sleep_hours: string | number;
   workouts: number;
@@ -52,6 +54,13 @@ type RecipeRow = {
   instructions: string;
   created_at: string;
   updated_at: string;
+};
+
+type ParticipantSettings = {
+  participant: "gaia" | "tiziano";
+  steps_target: number;
+  weekly_workout_target: number;
+  rest_weekdays: string;
 };
 
 type RecipeIngredientRow = {
@@ -116,6 +125,10 @@ type DashboardPayload = {
     tiziano_steps: number;
     gaia_sports: string;
     tiziano_sports: string;
+    gaia_steps_target: number;
+    tiziano_steps_target: number;
+    gaia_weekly_target: number;
+    tiziano_weekly_target: number;
     water_l: number;
     water_target_l: number;
     sleep_hours: number;
@@ -182,6 +195,7 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
     challengeStartResult,
     mealPlanResult,
     targetsResult,
+    settingsResult,
     recipesResult
   ] = await Promise.all([
     admin.database
@@ -197,7 +211,7 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
       .limit(1),
     admin.database
       .from("challenge_daily_logs")
-      .select("date,participant,steps,sports,water_l,sleep_hours,workouts,updated_at")
+      .select("date,participant,steps,sports,workout_minutes,sport_minutes,water_l,sleep_hours,workouts,updated_at")
       .eq("date", today)
       .in("participant", ["gaia", "tiziano"]),
     admin.database
@@ -216,6 +230,10 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
       .from("health_targets")
       .select("metric,label,target_value,unit,updated_at")
       .order("metric", { ascending: true }),
+    admin.database
+      .from("participant_fitness_settings")
+      .select("participant,steps_target,weekly_workout_target,rest_weekdays")
+      .in("participant", ["gaia", "tiziano"]),
     admin.database
       .from("recipes")
       .select("id,title,photo_url,photo_key,total_calories,carbs_g,fat_g,protein_g,rating,instructions,created_at,updated_at")
@@ -240,6 +258,9 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
 
   const { data: targets, error: targetsError } = targetsResult;
   if (targetsError) throw targetsError;
+
+  const { data: settingsRows, error: settingsError } = settingsResult;
+  if (settingsError) throw settingsError;
 
   const { data: recipes, error: recipesError } = recipesResult;
   if (recipesError) throw recipesError;
@@ -269,8 +290,11 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
   const challengeHistory = challengeStartRows as Array<Pick<ChallengeLog, "date" | "participant" | "workouts">>;
   const gaiaChallenge = challenges.find((row) => row.participant === "gaia") ?? null;
   const tizianoChallenge = challenges.find((row) => row.participant === "tiziano") ?? null;
-  const gaiaStreak = consecutiveWorkoutDays(today, challengeHistory, "gaia");
-  const tizianoStreak = consecutiveWorkoutDays(today, challengeHistory, "tiziano");
+  const settings = settingsRows as ParticipantSettings[];
+  const gaiaSettings = settings.find((row) => row.participant === "gaia") ?? null;
+  const tizianoSettings = settings.find((row) => row.participant === "tiziano") ?? null;
+  const gaiaStreak = consecutiveWorkoutDays(today, challengeHistory, "gaia", parseRestWeekdays(gaiaSettings?.rest_weekdays));
+  const tizianoStreak = consecutiveWorkoutDays(today, challengeHistory, "tiziano", parseRestWeekdays(tizianoSettings?.rest_weekdays));
   const gaiaWeekWorkouts = weeklyWorkoutCount(today, challengeHistory, "gaia");
   const tizianoWeekWorkouts = weeklyWorkoutCount(today, challengeHistory, "tiziano");
   const healthTargets = targets as HealthTarget[];
@@ -306,8 +330,12 @@ async function loadDashboardPayload(today = dashboardLocalDate()): Promise<Dashb
       tiziano_week_workouts: tizianoWeekWorkouts,
       gaia_steps: Math.max(0, Number(gaiaChallenge?.steps ?? 0)),
       tiziano_steps: Math.max(0, Number(tizianoChallenge?.steps ?? 0)),
-      gaia_sports: String(gaiaChallenge?.sports ?? ""),
-      tiziano_sports: String(tizianoChallenge?.sports ?? ""),
+      gaia_sports: formatSports(gaiaChallenge),
+      tiziano_sports: formatSports(tizianoChallenge),
+      gaia_steps_target: Math.max(1, Number(gaiaSettings?.steps_target ?? stepsTarget.target_value)),
+      tiziano_steps_target: Math.max(1, Number(tizianoSettings?.steps_target ?? stepsTarget.target_value)),
+      gaia_weekly_target: Math.max(1, Number(gaiaSettings?.weekly_workout_target ?? 3)),
+      tiziano_weekly_target: Math.max(1, Number(tizianoSettings?.weekly_workout_target ?? 3)),
       water_l: Math.max(0, Number(tizianoChallenge?.water_l ?? 0)),
       water_target_l: 3,
       sleep_hours: Math.max(0, Number(tizianoChallenge?.sleep_hours ?? 0)),
@@ -433,7 +461,8 @@ function addLocalDays(date: string, offset: number): string {
 function consecutiveWorkoutDays(
   today: string,
   rows: Array<Pick<ChallengeLog, "date" | "participant" | "workouts">>,
-  participant: ChallengeLog["participant"]
+  participant: ChallengeLog["participant"],
+  restWeekdays = new Set<number>()
 ): number {
   const completedDates = new Set(
     rows
@@ -441,13 +470,36 @@ function consecutiveWorkoutDays(
       .map((row) => row.date)
   );
   let cursor = today;
-  if (!completedDates.has(cursor)) cursor = addLocalDays(cursor, -1);
+  if (!completedDates.has(cursor) && !restWeekdays.has(weekdayForDate(cursor))) cursor = addLocalDays(cursor, -1);
   let streak = 0;
-  while (streak < 75 && completedDates.has(cursor)) {
-    streak += 1;
+  let inspected = 0;
+  while (streak < 75 && inspected < 150) {
+    if (completedDates.has(cursor)) streak += 1;
+    else if (!restWeekdays.has(weekdayForDate(cursor))) break;
     cursor = addLocalDays(cursor, -1);
+    inspected += 1;
   }
   return streak;
+}
+
+function parseRestWeekdays(value: string | undefined): Set<number> {
+  return new Set(String(value ?? "").split(",").filter(Boolean).map(Number));
+}
+
+function weekdayForDate(date: string): number {
+  return new Date(localDateIndex(date) * 86400000).getUTCDay();
+}
+
+function formatSports(challenge: ChallengeLog | null): string {
+  const minutes = challenge?.sport_minutes && typeof challenge.sport_minutes === "object"
+    ? challenge.sport_minutes
+    : {};
+  return String(challenge?.sports ?? "")
+    .split(",")
+    .map((sport) => sport.trim())
+    .filter(Boolean)
+    .map((sport) => `${sport}${Number(minutes[sport] ?? 0) > 0 ? ` - ${Math.round(Number(minutes[sport]))} min` : ""}`)
+    .join(",");
 }
 
 function weeklyWorkoutCount(

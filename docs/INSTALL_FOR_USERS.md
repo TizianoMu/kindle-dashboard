@@ -239,6 +239,29 @@ riepilogo oggi
 The reply includes today's steps and sports, today's workout count, the current
 consecutive-day streak, and workouts completed since Monday.
 
+Personal fitness settings:
+
+```text
+obiettivo passi 8000
+obiettivo allenamenti 4 a settimana
+riposo programmato domenica
+promemoria on
+promemoria off
+```
+
+Workout duration can be included in the normal check-in:
+
+```text
+palestra fatta 60 minuti
+nuoto completato 45 min
+kayak fatto 1 ora
+```
+
+Rest weekdays do not interrupt the workout streak. An hourly automation checks
+personal reminders at 20:00 Europe/Rome and sends a weekly summary on Sunday.
+The Kindle day arrows can be used from the Exercise screen to inspect previous
+dates.
+
 ### Today's Meal Plan
 
 Meal plan commands match saved recipe titles by partial title. Use these after

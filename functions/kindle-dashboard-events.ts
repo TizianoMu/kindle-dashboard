@@ -32,6 +32,7 @@ type ChallengeLog = {
   participant: "gaia" | "tiziano";
   steps: number;
   sports: string;
+  workout_minutes: number;
   water_l: string | number;
   sleep_hours: string | number;
   workouts: number;
@@ -56,6 +57,7 @@ type DashboardData = {
   health: HealthSummary | null;
   targets: HealthTarget[];
   challenge: ChallengeLog[];
+  fitnessSettings: unknown[];
   mealPlan: MealPlanEntry[];
   recipes: RecipeVersion[];
 };
@@ -149,7 +151,8 @@ async function loadDashboardData(): Promise<DashboardData> {
     challengeResult,
     targetsResult,
     mealPlanResult,
-    recipesResult
+    recipesResult,
+    settingsResult
   ] = await Promise.all([
     admin.database
       .from("planner_items")
@@ -164,7 +167,7 @@ async function loadDashboardData(): Promise<DashboardData> {
       .limit(1),
     admin.database
       .from("challenge_daily_logs")
-      .select("date,participant,steps,sports,water_l,sleep_hours,workouts,updated_at")
+      .select("date,participant,steps,sports,workout_minutes,water_l,sleep_hours,workouts,updated_at")
       .eq("date", today)
       .in("participant", ["gaia", "tiziano"]),
     admin.database
@@ -179,7 +182,11 @@ async function loadDashboardData(): Promise<DashboardData> {
     admin.database
       .from("recipes")
       .select("id,rating,updated_at")
-      .order("id", { ascending: true })
+      .order("id", { ascending: true }),
+    admin.database
+      .from("participant_fitness_settings")
+      .select("participant,steps_target,weekly_workout_target,rest_weekdays,reminders_enabled,updated_at")
+      .order("participant", { ascending: true })
   ]);
   const baseQueryMs = elapsedMs(baseStarted);
 
@@ -200,12 +207,15 @@ async function loadDashboardData(): Promise<DashboardData> {
 
   const { data: recipeRows, error: recipesError } = recipesResult;
   if (recipesError) throw recipesError;
+  const { data: settingsRows, error: settingsError } = settingsResult;
+  if (settingsError) throw settingsError;
 
   const payload = {
     items: items as PlannerItem[],
     health: firstRow<HealthSummary>(healthRows),
     targets: targets as HealthTarget[],
     challenge: challengeRows as ChallengeLog[],
+    fitnessSettings: Array.isArray(settingsRows) ? settingsRows : [],
     mealPlan: mealPlanRows as MealPlanEntry[],
     recipes: recipeRows as RecipeVersion[]
   };
@@ -222,6 +232,7 @@ function getDashboardVersion(data: DashboardData): string {
     items: [...data.items].sort((a, b) => a.updated_at.localeCompare(b.updated_at)),
     health: data.health,
     challenge: data.challenge,
+    fitnessSettings: data.fitnessSettings,
     mealPlan: data.mealPlan,
     recipes: data.recipes,
     targets: [...data.targets].sort((a, b) => a.metric.localeCompare(b.metric))

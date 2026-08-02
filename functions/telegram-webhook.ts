@@ -23,6 +23,7 @@ type ChallengeAction = {
   action: "add_water" | "set_sleep" | "add_workout" | "set_steps" | "undo_workout" | "remove_sport";
   value: number;
   sport?: string;
+  duration_minutes?: number;
 };
 
 type Participant = "gaia" | "tiziano";
@@ -30,6 +31,14 @@ type Participant = "gaia" | "tiziano";
 type SummaryAction = {
   kind: "summary";
   action: "today";
+};
+
+type FitnessSettingsAction = {
+  kind: "fitness_settings";
+  action: "set_weekly_target" | "set_rest_day" | "set_reminders";
+  value?: number;
+  weekday?: number;
+  enabled?: boolean;
 };
 
 type RecipeIngredientInput = {
@@ -64,7 +73,7 @@ type MealPlanAction = {
   recipes: string[];
 };
 
-type TelegramAction = PlannerAction | HealthTargetAction | RecipeAction | RecipeRatingAction | ChallengeAction | MealPlanAction | SummaryAction;
+type TelegramAction = PlannerAction | HealthTargetAction | RecipeAction | RecipeRatingAction | ChallengeAction | MealPlanAction | SummaryAction | FitnessSettingsAction;
 
 type TelegramUpdate = {
   message?: {
@@ -192,12 +201,16 @@ async function applyTelegramAction(admin: any, action: TelegramAction, participa
     if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
     return applyTodaySummary(admin, participant);
   }
+  if (isFitnessSettingsAction(action)) {
+    if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
+    return applyFitnessSettingsAction(admin, action, participant);
+  }
   if (isChallengeAction(action)) {
     if (!participant) throw new Error("Telegram chat is not assigned to Gaia or Tiziano");
     return applyChallengeAction(admin, action, participant);
   }
   if (isMealPlanAction(action)) return applyMealPlanAction(admin, action);
-  if (isTargetAction(action)) return applyHealthTargetAction(admin, action);
+  if (isTargetAction(action)) return applyHealthTargetAction(admin, action, participant);
   if (isRecipeRatingAction(action)) return applyRecipeRatingAction(admin, action);
   if (isRecipeAction(action)) return applyRecipeAction(admin, action);
   return applyPlannerAction(admin, action);
@@ -208,7 +221,7 @@ async function applyTodaySummary(admin: any, participant: Participant): Promise<
   const [todayResult, historyResult, targetResult] = await Promise.all([
     admin.database
       .from("challenge_daily_logs")
-      .select("date,steps,workouts,sports")
+      .select("date,steps,workouts,sports,workout_minutes,sport_minutes")
       .eq("date", date)
       .eq("participant", participant)
       .limit(1),
@@ -220,9 +233,9 @@ async function applyTodaySummary(admin: any, participant: Participant): Promise<
       .order("date", { ascending: false })
       .limit(75),
     admin.database
-      .from("health_targets")
-      .select("target_value")
-      .eq("metric", "steps")
+      .from("participant_fitness_settings")
+      .select("steps_target,weekly_workout_target,rest_weekdays")
+      .eq("participant", participant)
       .limit(1)
   ]);
   if (todayResult.error) throw todayResult.error;
@@ -233,21 +246,62 @@ async function applyTodaySummary(admin: any, participant: Participant): Promise<
   const history = Array.isArray(historyResult.data) ? historyResult.data : [];
   const target = Array.isArray(targetResult.data) ? targetResult.data[0] : null;
   const steps = Math.max(0, Number(today?.steps ?? 0));
-  const stepsTarget = Math.max(0, Number(target?.target_value ?? 10000));
+  const stepsTarget = Math.max(0, Number(target?.steps_target ?? 10000));
+  const weeklyTarget = Math.max(1, Number(target?.weekly_workout_target ?? 3));
   const workouts = Math.max(0, Number(today?.workouts ?? 0));
   const sports = parseStoredSports(today?.sports);
-  const streak = consecutiveWorkoutDays(date, history);
+  const sportMinutes = parseSportMinutes(today?.sport_minutes);
+  const restWeekdays = new Set(String(target?.rest_weekdays ?? "").split(",").filter(Boolean).map(Number));
+  const streak = consecutiveWorkoutDays(date, history, restWeekdays);
   const weekWorkouts = weeklyWorkoutCount(date, history);
   const name = participant === "gaia" ? "GAIA" : "TIZIANO";
 
   return [
     `RIEPILOGO OGGI — ${name}`,
     `Passi: ${formatInteger(steps)} / ${formatInteger(stepsTarget)}`,
-    `Sport: ${sports.length > 0 ? sports.join(", ") : "nessuno"}`,
-    `Allenamenti oggi: ${workouts}`,
+    `Sport: ${sports.length > 0 ? sports.map((sport) => `${sport}${sportMinutes[sport] ? ` (${sportMinutes[sport]} min)` : ""}`).join(", ") : "nessuno"}`,
+    `Allenamenti oggi: ${workouts}${today?.workout_minutes ? ` — ${today.workout_minutes} min` : ""}`,
     `Streak: ${streak} giorni`,
-    `Settimana: ${weekWorkouts} allenamenti`
+    `Settimana: ${weekWorkouts} / ${weeklyTarget} allenamenti`
   ].join("\n");
+}
+
+async function applyFitnessSettingsAction(admin: any, action: FitnessSettingsAction, participant: Participant): Promise<string> {
+  const name = participant === "gaia" ? "Gaia" : "Tiziano";
+  if (action.action === "set_weekly_target") {
+    const target = Math.max(1, Math.round(Number(action.value ?? 1)));
+    const { error } = await admin.database
+      .from("participant_fitness_settings")
+      .update({ weekly_workout_target: target })
+      .eq("participant", participant);
+    if (error) throw error;
+    return `Obiettivo settimanale di ${name}: ${target} allenamenti.`;
+  }
+  if (action.action === "set_reminders") {
+    const enabled = action.enabled !== false;
+    const { error } = await admin.database
+      .from("participant_fitness_settings")
+      .update({ reminders_enabled: enabled })
+      .eq("participant", participant);
+    if (error) throw error;
+    return `Promemoria di ${name} ${enabled ? "attivati" : "disattivati"}.`;
+  }
+
+  const weekday = Math.max(0, Math.min(6, Math.round(Number(action.weekday ?? 0))));
+  const { data, error: selectError } = await admin.database
+    .from("participant_fitness_settings")
+    .select("rest_weekdays")
+    .eq("participant", participant)
+    .limit(1);
+  if (selectError) throw selectError;
+  const existing = Array.isArray(data) ? String(data[0]?.rest_weekdays ?? "") : "";
+  const weekdays = [...new Set(existing.split(",").filter(Boolean).map(Number).concat(weekday))];
+  const { error } = await admin.database
+    .from("participant_fitness_settings")
+    .update({ rest_weekdays: weekdays.join(",") })
+    .eq("participant", participant);
+  if (error) throw error;
+  return `Riposo programmato per ${name}: ${weekdayLabel(weekday)}.`;
 }
 
 async function applyMealPlanAction(admin: any, action: MealPlanAction): Promise<string> {
@@ -327,7 +381,7 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
   const date = dashboardLocalDate();
   const { data: existingRows, error: selectError } = await admin.database
     .from("challenge_daily_logs")
-    .select("date,participant,steps,water_l,sleep_hours,workouts,sports")
+    .select("date,participant,steps,water_l,sleep_hours,workouts,sports,workout_minutes,sport_minutes")
     .eq("date", date)
     .eq("participant", participant)
     .limit(1);
@@ -343,12 +397,16 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
   const currentWorkouts = Math.max(0, Number(existing?.workouts ?? 0));
   const currentSteps = Math.max(0, Number(existing?.steps ?? 0));
   const currentSports = parseStoredSports(existing?.sports);
+  const currentMinutes = Math.max(0, Number(existing?.workout_minutes ?? 0));
+  const sportMinutes = parseSportMinutes(existing?.sport_minutes);
   const next = {
     steps: currentSteps,
     water_l: currentWater,
     sleep_hours: currentSleep,
     workouts: currentWorkouts,
-    sports: currentSports.join(",")
+    sports: currentSports.join(","),
+    workout_minutes: currentMinutes,
+    sport_minutes: sportMinutes
   };
 
   if (action.action === "add_water") {
@@ -359,14 +417,23 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
     next.workouts = currentWorkouts + Math.max(1, Math.round(action.value));
     const sport = normalizeSport(action.sport || "allenamento");
     next.sports = [...new Set([...currentSports, sport])].join(",");
+    const duration = Math.max(0, Math.round(Number(action.duration_minutes ?? 0)));
+    next.workout_minutes = currentMinutes + duration;
+    next.sport_minutes = { ...sportMinutes, [sport]: Math.max(0, Number(sportMinutes[sport] ?? 0)) + duration };
   } else if (action.action === "set_steps") {
     next.steps = Math.max(0, Math.round(action.value));
   } else if (action.action === "undo_workout") {
     if (currentWorkouts <= 0) return `Nessun allenamento di ${participantName} da annullare oggi.`;
     next.workouts = currentWorkouts - 1;
     const remainingSports = [...currentSports];
-    remainingSports.pop();
+    const removedSport = remainingSports.pop();
     next.sports = remainingSports.join(",");
+    if (removedSport) {
+      const removedMinutes = Math.max(0, Number(sportMinutes[removedSport] ?? 0));
+      next.workout_minutes = Math.max(0, currentMinutes - removedMinutes);
+      next.sport_minutes = { ...sportMinutes };
+      delete next.sport_minutes[removedSport];
+    }
   } else if (action.action === "remove_sport") {
     const sport = normalizeSport(action.sport || "");
     const sportIndex = currentSports.indexOf(sport);
@@ -375,6 +442,10 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
     remainingSports.splice(sportIndex, 1);
     next.sports = remainingSports.join(",");
     next.workouts = Math.max(0, currentWorkouts - 1);
+    const removedMinutes = Math.max(0, Number(sportMinutes[sport] ?? 0));
+    next.workout_minutes = Math.max(0, currentMinutes - removedMinutes);
+    next.sport_minutes = { ...sportMinutes };
+    delete next.sport_minutes[sport];
   }
 
   if (existing) {
@@ -396,7 +467,8 @@ async function applyChallengeAction(admin: any, action: ChallengeAction, partici
   if (action.action === "set_steps") return `Passi ${participantName} registrati: ${formatNumber(next.steps)} oggi.`;
   if (action.action === "undo_workout") return `Ultimo allenamento di ${participantName} annullato (${next.workouts} oggi).`;
   if (action.action === "remove_sport") return `${normalizeSport(action.sport || "")} rimosso dagli allenamenti di ${participantName} di oggi.`;
-  return `Allenamento ${participantName} registrato: ${normalizeSport(action.sport || "allenamento")} (${next.workouts} oggi).`;
+  const durationText = action.duration_minutes ? `, ${Math.round(action.duration_minutes)} min` : "";
+  return `Allenamento ${participantName} registrato: ${normalizeSport(action.sport || "allenamento")}${durationText} (${next.workouts} oggi).`;
 }
 
 async function applyPlannerAction(admin: any, action: PlannerAction): Promise<string> {
@@ -458,7 +530,16 @@ function plannerListLabel(listKey: ListKey): string {
   return labels[listKey];
 }
 
-async function applyHealthTargetAction(admin: any, action: HealthTargetAction): Promise<string> {
+async function applyHealthTargetAction(admin: any, action: HealthTargetAction, participant: Participant | null): Promise<string> {
+  if (action.metric === "steps" && participant) {
+    const { error } = await admin.database
+      .from("participant_fitness_settings")
+      .update({ steps_target: Math.round(action.value) })
+      .eq("participant", participant);
+    if (error) throw error;
+    const name = participant === "gaia" ? "Gaia" : "Tiziano";
+    return `Obiettivo passi di ${name} impostato a ${formatNumber(action.value)}.`;
+  }
   const unit = action.unit || (action.metric === "steps" ? "steps" : "kcal");
   const label = action.metric === "steps" ? "STEPS" : "CALORIES";
 
@@ -596,6 +677,8 @@ function parseFastHeuristicMessage(message: string): TelegramAction | null {
   if (/^(riepilogo|resoconto|summary)(?:\s+(oggi|today))?$/.test(lower)) {
     return { kind: "summary", action: "today" };
   }
+  const fitnessSettings = parseFitnessSettingsHeuristically(normalized);
+  if (fitnessSettings) return fitnessSettings;
 
   const challengeAction = parseChallengeHeuristically(normalized);
   if (challengeAction) return challengeAction;
@@ -723,6 +806,8 @@ function parseMessageHeuristically(message: string): TelegramAction {
   if (/^(riepilogo|resoconto|summary)(?:\s+(oggi|today))?$/.test(normalizedSummary)) {
     return { kind: "summary", action: "today" };
   }
+  const fitnessSettings = parseFitnessSettingsHeuristically(message);
+  if (fitnessSettings) return fitnessSettings;
 
   const challengeAction = parseChallengeHeuristically(message);
   if (challengeAction) return challengeAction;
@@ -823,6 +908,9 @@ function validateTargetAction(input: unknown): HealthTargetAction | null {
     action: "set_target",
     metric: candidate.metric,
     value,
+    duration_minutes: candidate.action === "add_workout"
+      ? Math.max(0, Math.round(Number(candidate.duration_minutes ?? 0)))
+      : undefined,
     unit
   };
 }
@@ -926,6 +1014,23 @@ function normalizeRecipeIngredient(input: unknown): RecipeIngredientInput | null
   };
 }
 
+function parseFitnessSettingsHeuristically(message: string): FitnessSettingsAction | null {
+  const lower = message.trim().replace(/\s+/g, " ").toLowerCase();
+  if (/\b(promemoria|promemoria|reminder|reminders)\b/.test(lower)) {
+    if (/\b(off|disattiva|disattivati|no)\b/.test(lower)) return { kind: "fitness_settings", action: "set_reminders", enabled: false };
+    if (/\b(on|attiva|attivati|si|sì)\b/.test(lower)) return { kind: "fitness_settings", action: "set_reminders", enabled: true };
+  }
+  if (/\b(obiettivo|target|goal)\b/.test(lower) && /\b(allenamenti|workouts)\b/.test(lower) && /\b(settimana|settimanale|weekly)\b/.test(lower)) {
+    const match = lower.match(/\b([1-9][0-9]?)\b/);
+    if (match) return { kind: "fitness_settings", action: "set_weekly_target", value: Number(match[1]) };
+  }
+  if (/\b(riposo|rest)\b/.test(lower) && /\b(programmato|programma|set|day|giorno)\b/.test(lower)) {
+    const weekday = weekdayFromMessage(lower);
+    if (weekday !== null) return { kind: "fitness_settings", action: "set_rest_day", weekday };
+  }
+  return null;
+}
+
 function parseTargetHeuristically(message: string): HealthTargetAction | null {
   const normalized = message.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
@@ -978,7 +1083,13 @@ function parseChallengeHeuristically(message: string): ChallengeAction | null {
   }
 
   if (/\b(workout|exercise|training|gym|allenamento|palestra|piscina|nuoto|calcio|dragonboat|kayak|corsa|running|bici|bicicletta|cycling)\b/.test(lower) && /\b(did|done|complete|completed|finished|marked|mark|fatto|fatta|completato|completata|finito|finita)\b/.test(lower)) {
-    return { kind: "challenge", action: "add_workout", value: 1, sport: sportFromMessage(lower) };
+    return {
+      kind: "challenge",
+      action: "add_workout",
+      value: 1,
+      sport: sportFromMessage(lower),
+      duration_minutes: durationMinutesFromMessage(lower)
+    };
   }
 
   return null;
@@ -1142,6 +1253,10 @@ function isSummaryAction(action: TelegramAction): action is SummaryAction {
   return (action as SummaryAction).kind === "summary";
 }
 
+function isFitnessSettingsAction(action: TelegramAction): action is FitnessSettingsAction {
+  return (action as FitnessSettingsAction).kind === "fitness_settings";
+}
+
 function sportFromMessage(message: string): string {
   const lower = message.toLowerCase();
   if (/\b(palestra|gym)\b/.test(lower)) return "palestra";
@@ -1174,18 +1289,57 @@ function parseStoredSports(value: unknown): string[] {
     .map(normalizeSport))];
 }
 
-function consecutiveWorkoutDays(today: string, rows: Array<{ date: string; workouts: number }>): number {
+function parseSportMinutes(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([sport, minutes]) => [normalizeSport(sport), Math.max(0, Math.round(Number(minutes) || 0))])
+  );
+}
+
+function durationMinutesFromMessage(message: string): number {
+  const hours = message.match(/([0-9]+(?:[.,][0-9]+)?)\s*(?:h|ora|ore|hour|hours)\b/i);
+  if (hours) return Math.round(Number(hours[1].replace(",", ".")) * 60);
+  const minutes = message.match(/([0-9]+)\s*(?:min|mins|minuti|minutes)\b/i);
+  return minutes ? Math.max(0, Number(minutes[1])) : 0;
+}
+
+function weekdayFromMessage(message: string): number | null {
+  const labels = [
+    [0, /\b(domenica|sunday)\b/],
+    [1, /\b(lunedi|lunedì|monday)\b/],
+    [2, /\b(martedi|martedì|tuesday)\b/],
+    [3, /\b(mercoledi|mercoledì|wednesday)\b/],
+    [4, /\b(giovedi|giovedì|thursday)\b/],
+    [5, /\b(venerdi|venerdì|friday)\b/],
+    [6, /\b(sabato|saturday)\b/]
+  ] as const;
+  return labels.find(([, pattern]) => pattern.test(message))?.[0] ?? null;
+}
+
+function weekdayLabel(weekday: number): string {
+  return ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"][weekday] ?? "giorno";
+}
+
+function consecutiveWorkoutDays(today: string, rows: Array<{ date: string; workouts: number }>, restWeekdays = new Set<number>()): number {
   const completedDates = new Set(
     rows.filter((row) => Number(row.workouts) > 0).map((row) => row.date)
   );
   let cursor = today;
-  if (!completedDates.has(cursor)) cursor = addLocalDays(cursor, -1);
+  if (!completedDates.has(cursor) && !restWeekdays.has(weekdayForDate(cursor))) cursor = addLocalDays(cursor, -1);
   let streak = 0;
-  while (streak < 75 && completedDates.has(cursor)) {
-    streak += 1;
+  let inspected = 0;
+  while (streak < 75 && inspected < 150) {
+    if (completedDates.has(cursor)) streak += 1;
+    else if (!restWeekdays.has(weekdayForDate(cursor))) break;
     cursor = addLocalDays(cursor, -1);
+    inspected += 1;
   }
   return streak;
+}
+
+function weekdayForDate(date: string): number {
+  return new Date(localDateIndex(date) * 86400000).getUTCDay();
 }
 
 function weeklyWorkoutCount(today: string, rows: Array<{ date: string; workouts: number }>): number {
